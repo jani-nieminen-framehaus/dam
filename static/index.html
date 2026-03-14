@@ -1,0 +1,1240 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DAM</title>
+<style>
+  /* ── Reset & Base ─────────────────────────────────────────────────────── */
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg:        #0e0e0e;
+    --bg2:       #161616;
+    --bg3:       #1f1f1f;
+    --border:    #2a2a2a;
+    --text:      #d4d4d4;
+    --text-dim:  #666;
+    --text-mid:  #999;
+    --accent:    #c8a96e;
+    --pick:      #4caf82;
+    --reject:    #e05555;
+    --sel:       #3a7bd5;
+    --panel-w:   280px;
+    --toolbar-h: 44px;
+  }
+
+  html, body { height: 100%; overflow: hidden; background: var(--bg); color: var(--text);
+    font: 13px/1.4 -apple-system, BlinkMacSystemFont, 'Helvetica Neue', sans-serif; }
+
+  button { background: none; border: none; color: var(--text); cursor: pointer;
+    font: inherit; padding: 0; }
+  button:hover { color: #fff; }
+  select { background: var(--bg3); border: 1px solid var(--border); color: var(--text);
+    font: inherit; padding: 4px 6px; border-radius: 3px; cursor: pointer; width: 100%; }
+  input[type=range] { width: 100%; accent-color: var(--accent); }
+  input[type=text], input[type=date] { background: var(--bg3); border: 1px solid var(--border);
+    color: var(--text); font: inherit; padding: 4px 6px; border-radius: 3px; width: 100%; }
+  input[type=text]:focus, input[type=date]:focus, select:focus {
+    outline: 1px solid var(--accent); }
+
+  /* ── Layout ───────────────────────────────────────────────────────────── */
+  #app { display: flex; flex-direction: column; height: 100vh; }
+
+  #toolbar {
+    display: flex; align-items: center; gap: 12px;
+    height: var(--toolbar-h); padding: 0 12px;
+    background: var(--bg2); border-bottom: 1px solid var(--border);
+    flex-shrink: 0; z-index: 10;
+  }
+  
+  #ingest-progress {
+    display: none; align-items: center; gap: 8px; font-size: 11px;
+    background: var(--bg3); border-radius: 4px; padding: 4px 10px;
+  }
+  #ingest-progress.active { display: flex; }
+  .progress-track {
+    width: 100px; height: 4px; background: var(--bg); border-radius: 2px; overflow: hidden;
+  }
+  .progress-fill {
+    height: 100%; background: var(--accent); width: 0%; transition: width 0.3s linear;
+  }
+
+  #main { display: flex; flex: 1; overflow: hidden; }
+
+  /* ── Filter Panel ─────────────────────────────────────────────────────── */
+  #filter-panel {
+    width: var(--panel-w); flex-shrink: 0;
+    background: var(--bg2); border-right: 1px solid var(--border);
+    overflow-y: auto; padding: 12px;
+    display: flex; flex-direction: column; gap: 16px;
+  }
+  #filter-panel.hidden { display: none; }
+
+  .filter-group label {
+    display: block; font-size: 10px; letter-spacing: .08em;
+    text-transform: uppercase; color: var(--text-dim); margin-bottom: 6px;
+  }
+  .filter-group { display: flex; flex-direction: column; gap: 6px; }
+
+  .filter-chips { display: flex; flex-wrap: wrap; gap: 4px; }
+  .chip {
+    padding: 3px 8px; border-radius: 12px; font-size: 11px;
+    border: 1px solid var(--border); color: var(--text-mid); cursor: pointer;
+    transition: all .15s;
+  }
+  .chip:hover { border-color: var(--text-mid); color: var(--text); }
+  .chip.active { background: var(--accent); border-color: var(--accent);
+    color: #000; font-weight: 600; }
+  .chip.pick-active  { background: var(--pick);   border-color: var(--pick);   color: #000; }
+  .chip.reject-active{ background: var(--reject); border-color: var(--reject); color: #fff; }
+
+  .range-row { display: flex; align-items: center; gap: 6px; font-size: 11px;
+    color: var(--text-mid); }
+  .range-row span { min-width: 14px; text-align: center; }
+
+  /* ── Grid View ────────────────────────────────────────────────────────── */
+  #grid-view {
+    flex: 1; overflow-y: auto; padding: 12px;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+    gap: 4px; align-content: start;
+  }
+  #grid-view.hidden { display: none; }
+
+  .thumb-cell {
+    position: relative; aspect-ratio: 3/2; cursor: pointer;
+    background: var(--bg3); border-radius: 2px; overflow: hidden;
+    border: 2px solid transparent; transition: border-color .1s;
+  }
+  .thumb-cell:hover { border-color: var(--text-dim); }
+  .thumb-cell.active { border-color: var(--accent); }
+  .thumb-cell.pick   { border-color: var(--pick); }
+  .thumb-cell.reject { opacity: .35; }
+  .thumb-cell img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .thumb-cell .no-thumb {
+    width: 100%; height: 100%; display: flex; align-items: center;
+    justify-content: center; font-size: 10px; color: var(--text-dim);
+  }
+  .thumb-cell .rating-dots {
+    position: absolute; bottom: 3px; left: 4px;
+    display: flex; gap: 2px;
+  }
+  .rating-dot {
+    width: 5px; height: 5px; border-radius: 50%;
+    background: var(--accent); opacity: .9;
+  }
+  .thumb-cell .pick-flag {
+    position: absolute; top: 3px; right: 3px;
+    width: 8px; height: 8px; border-radius: 50%;
+  }
+  .thumb-cell .pick-flag.pick   { background: var(--pick); }
+  .thumb-cell .pick-flag.reject { background: var(--reject); }
+
+  #grid-footer {
+    grid-column: 1/-1; padding: 16px 0;
+    display: flex; justify-content: center;
+  }
+  #load-more {
+    padding: 8px 20px; border: 1px solid var(--border); border-radius: 4px;
+    color: var(--text-mid); cursor: pointer; font: inherit;
+    transition: all .15s; background: none;
+  }
+  #load-more:hover { border-color: var(--text); color: var(--text); }
+  #load-more:disabled { opacity: .4; cursor: default; }
+
+  /* ── Review View ──────────────────────────────────────────────────────── */
+  #review-view {
+    flex: 1; display: flex; overflow: hidden;
+  }
+  #review-view.hidden { display: none; }
+
+  #review-image-area {
+    flex: 1; display: flex; align-items: center; justify-content: center;
+    background: #000; position: relative; overflow: hidden; cursor: pointer;
+  }
+  #review-img {
+    max-width: 100%; max-height: 100%; object-fit: contain;
+    user-select: none; transition: opacity .1s;
+  }
+  #review-img.loading { opacity: .3; }
+  #review-no-thumb {
+    color: var(--text-dim); font-size: 13px; text-align: center;
+  }
+
+  #review-nav-prev, #review-nav-next {
+    position: absolute; top: 50%; transform: translateY(-50%);
+    width: 48px; height: 80px; display: flex; align-items: center;
+    justify-content: center; background: rgba(0,0,0,.4);
+    border-radius: 4px; font-size: 20px; color: rgba(255,255,255,.5);
+    transition: all .15s; z-index: 2;
+  }
+  #review-nav-prev { left: 8px; }
+  #review-nav-next { right: 8px; }
+  #review-nav-prev:hover, #review-nav-next:hover {
+    background: rgba(0,0,0,.7); color: #fff; }
+
+  #review-meta {
+    width: 260px; flex-shrink: 0;
+    background: var(--bg2); border-left: 1px solid var(--border);
+    overflow-y: auto; padding: 16px;
+    display: flex; flex-direction: column; gap: 14px;
+  }
+
+  .meta-section { display: flex; flex-direction: column; gap: 6px; }
+  .meta-section h4 {
+    font-size: 10px; letter-spacing: .08em;
+    text-transform: uppercase; color: var(--text-dim);
+  }
+  .meta-row { display: flex; justify-content: space-between;
+    font-size: 12px; gap: 8px; }
+  .meta-row .label { color: var(--text-dim); flex-shrink: 0; }
+  .meta-row .val { color: var(--text); text-align: right;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  /* AI tags in meta panel */
+  .ai-desc { color: var(--text-mid); font-size: 12px; font-style: italic;
+    line-height: 1.5; padding: 2px 0 6px; }
+  .ai-keywords { display: flex; flex-wrap: wrap; gap: 4px; }
+  .ai-kw { background: var(--bg3); border: 1px solid var(--border); border-radius: 3px;
+    color: var(--text-mid); font-size: 11px; padding: 2px 6px; white-space: nowrap; }
+  .ai-kw:hover { color: var(--accent); border-color: var(--accent); cursor: pointer; }
+  #ai-section:empty { display: none; }
+
+  /* Workflow controls in meta panel */
+  .wf-stars { display: flex; gap: 4px; }
+  .star {
+    font-size: 18px; cursor: pointer; color: var(--border);
+    transition: color .1s; line-height: 1;
+  }
+  .star.lit { color: var(--accent); }
+  .star:hover { color: var(--accent); }
+
+  .wf-picks { display: flex; gap: 6px; margin-top: 2px; }
+  .pick-btn {
+    flex: 1; padding: 5px 0; border-radius: 3px;
+    border: 1px solid var(--border); font-size: 11px;
+    color: var(--text-mid); transition: all .15s; cursor: pointer;
+    background: none;
+  }
+  .pick-btn:hover { border-color: var(--text-mid); color: var(--text); }
+  .pick-btn.active-pick   { background: var(--pick);   border-color: var(--pick);   color: #000; font-weight: 600; }
+  .pick-btn.active-reject { background: var(--reject); border-color: var(--reject); color: #fff; font-weight: 600; }
+  .pick-btn.active-unmarked { border-color: var(--text-dim); color: var(--text); }
+
+  .wf-selkie {
+    display: flex; align-items: center; gap: 8px;
+    padding: 6px 8px; border-radius: 3px; border: 1px solid var(--border);
+    cursor: pointer; transition: all .15s; font-size: 12px; color: var(--text-mid);
+  }
+  .wf-selkie:hover { border-color: var(--accent); color: var(--text); }
+  .wf-selkie.active { border-color: var(--accent); color: var(--accent); font-weight: 600; }
+  .wf-selkie .selkie-star { font-size: 16px; }
+
+  /* Export / Open actions */
+  .export-actions { display: flex; gap: 6px; margin-top: 8px; }
+  .export-btn {
+    flex: 1; padding: 6px 0; border-radius: 3px;
+    border: 1px solid var(--border); font-size: 11px;
+    color: var(--text); background: var(--bg3);
+    cursor: pointer; transition: all .15s; display: flex; justify-content: center; align-items: center; gap: 4px;
+  }
+  .export-btn:hover { border-color: var(--text); background: var(--bg2); }
+
+  /* ── Toolbar elements ─────────────────────────────────────────────────── */
+  .tb-title { font-weight: 600; font-size: 14px; color: var(--accent);
+    letter-spacing: .05em; margin-right: 4px; }
+  .tb-count { font-size: 11px; color: var(--text-dim); }
+  .tb-sep { flex: 1; }
+
+  .tb-btn {
+    padding: 5px 10px; border-radius: 3px; font-size: 12px;
+    border: 1px solid var(--border); color: var(--text-mid);
+    transition: all .15s; background: none;
+  }
+  .tb-btn:hover { border-color: var(--text-mid); color: var(--text); }
+  .tb-btn.active { border-color: var(--accent); color: var(--accent); }
+
+  #search-box {
+    display: flex; align-items: center; position: relative;
+  }
+  #search-input {
+    width: 200px; padding: 5px 24px 5px 8px; border-radius: 3px;
+    font-size: 12px; border: 1px solid var(--border);
+    background: var(--bg3); color: var(--text);
+    transition: border-color .15s, width .2s;
+  }
+  #search-input:focus { border-color: var(--accent); outline: none; width: 280px; }
+  #search-input.active { border-color: var(--accent); color: var(--accent); }
+  .search-clear {
+    position: absolute; right: 4px; top: 50%; transform: translateY(-50%);
+    font-size: 14px; color: var(--text-dim); cursor: pointer;
+    display: none; padding: 2px 4px; line-height: 1;
+  }
+  .search-clear:hover { color: var(--text); }
+  .search-clear.visible { display: block; }
+
+  #view-toggle { display: flex; border: 1px solid var(--border); border-radius: 3px; overflow: hidden; }
+  #view-toggle button {
+    padding: 5px 10px; font-size: 12px; border-right: 1px solid var(--border);
+    color: var(--text-dim);
+  }
+  #view-toggle button:last-child { border-right: none; }
+  #view-toggle button.active { background: var(--bg3); color: var(--text); }
+
+  /* ── Keyboard hint bar ────────────────────────────────────────────────── */
+  #kb-hints {
+    display: flex; gap: 16px; padding: 5px 12px;
+    background: var(--bg2); border-top: 1px solid var(--border);
+    font-size: 10px; color: var(--text-dim); flex-shrink: 0;
+  }
+  .kb { display: flex; gap: 4px; align-items: center; }
+  .key {
+    display: inline-block; padding: 1px 5px; border-radius: 2px;
+    border: 1px solid var(--border); font-size: 10px; color: var(--text-mid);
+    background: var(--bg3); font-family: monospace;
+  }
+
+  /* ── Loading / empty states ───────────────────────────────────────────── */
+  .spinner {
+    width: 24px; height: 24px; border: 2px solid var(--border);
+    border-top-color: var(--accent); border-radius: 50%;
+    animation: spin .6s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  #loading-overlay {
+    position: absolute; inset: 0; display: flex; align-items: center;
+    justify-content: center; background: rgba(0,0,0,.6); z-index: 20;
+  }
+  #loading-overlay.hidden { display: none; }
+
+  .empty-state {
+    display: flex; flex-direction: column; align-items: center;
+    justify-content: center; gap: 8px; height: 100%;
+    color: var(--text-dim); font-size: 13px;
+  }
+
+  /* ── Notification toast ───────────────────────────────────────────────── */
+  #toast {
+    position: fixed; bottom: 40px; left: 50%; transform: translateX(-50%);
+    background: var(--bg3); border: 1px solid var(--border);
+    color: var(--text); padding: 8px 16px; border-radius: 4px;
+    font-size: 12px; pointer-events: none; opacity: 0;
+    transition: opacity .2s; z-index: 100;
+  }
+  #toast.show { opacity: 1; }
+</style>
+</head>
+<body>
+<div id="app">
+
+  <!-- Toolbar -->
+  <div id="toolbar">
+    <span class="tb-title">DAM</span>
+    <span class="tb-count" id="tb-count">—</span>
+    <div class="tb-sep"></div>
+
+    <!-- Progress Indicator -->
+    <div id="ingest-progress">
+      <span id="ingest-label">Ingesting...</span>
+      <div class="progress-track"><div class="progress-fill" id="ingest-bar"></div></div>
+      <span id="ingest-pct">0%</span>
+    </div>
+
+    <div id="search-box">
+      <input type="text" id="search-input" placeholder="Semantic search..." title="Search images by description (Enter to search, Esc to clear)">
+      <button class="search-clear" id="search-clear" title="Clear search">&times;</button>
+    </div>
+
+    <button class="tb-btn" id="btn-filters" title="Toggle filter panel">Filters</button>
+    <div id="view-toggle">
+      <button id="btn-review" class="active" title="Review mode (R)">Review</button>
+      <button id="btn-grid" title="Grid mode (G)">Grid</button>
+    </div>
+  </div>
+
+  <!-- Main area -->
+  <div id="main">
+
+    <!-- Filter panel -->
+    <div id="filter-panel">
+
+      <div class="filter-group">
+        <label>Camera</label>
+        <div class="filter-chips" id="chip-cameras"></div>
+      </div>
+
+      <div class="filter-group">
+        <label>Volume</label>
+        <div class="filter-chips" id="chip-volumes"></div>
+      </div>
+
+      <div class="filter-group">
+        <label>Rating</label>
+        <div class="range-row">
+          <span id="rating-min-val">0</span>
+          <input type="range" id="rating-min" min="0" max="5" value="0">
+          <span>–</span>
+          <input type="range" id="rating-max" min="0" max="5" value="5">
+          <span id="rating-max-val">5</span>
+        </div>
+      </div>
+
+      <div class="filter-group">
+        <label>Pick</label>
+        <div class="filter-chips" id="chip-picks"></div>
+      </div>
+
+      <div class="filter-group">
+        <label>Edit Status</label>
+        <div class="filter-chips" id="chip-status"></div>
+      </div>
+
+      <div class="filter-group">
+        <label>Triptych Leg</label>
+        <div class="filter-chips" id="chip-triptych"></div>
+      </div>
+
+      <div class="filter-group">
+        <label>Date Range</label>
+        <input type="date" id="date-from" placeholder="From">
+        <input type="date" id="date-to" placeholder="To">
+      </div>
+
+      <div class="filter-group">
+        <label>Selkies only</label>
+        <div class="filter-chips">
+          <span class="chip" id="chip-selkie" data-val="false">★ Selkie</span>
+        </div>
+      </div>
+
+      <button class="tb-btn" id="btn-reset-filters"
+        style="margin-top:4px; width:100%; text-align:center;">
+        Reset Filters
+      </button>
+
+    </div>
+
+    <!-- Grid view -->
+    <div id="grid-view" class="hidden">
+      <div id="grid-footer" style="display:none">
+        <button id="load-more">Load more</button>
+      </div>
+    </div>
+
+    <!-- Review view -->
+    <div id="review-view">
+      <div id="review-image-area">
+        <div id="loading-overlay"><div class="spinner"></div></div>
+        <img id="review-img" class="loading" alt="">
+        <div id="review-no-thumb" style="display:none">No thumbnail</div>
+        <button id="review-nav-prev">‹</button>
+        <button id="review-nav-next">›</button>
+      </div>
+
+      <div id="review-meta">
+
+        <div class="meta-section">
+          <h4>Workflow</h4>
+          <div class="wf-stars" id="wf-stars">
+            <span class="star" data-v="1">★</span>
+            <span class="star" data-v="2">★</span>
+            <span class="star" data-v="3">★</span>
+            <span class="star" data-v="4">★</span>
+            <span class="star" data-v="5">★</span>
+          </div>
+          <div class="wf-picks">
+            <button class="pick-btn" id="btn-pick"   data-v="pick">Pick</button>
+            <button class="pick-btn" id="btn-unmark" data-v="unmarked">—</button>
+            <button class="pick-btn" id="btn-reject" data-v="reject">Reject</button>
+          </div>
+          <div class="wf-selkie" id="wf-selkie">
+            <span class="selkie-star">★</span>
+            <span>Selkie</span>
+          </div>
+          
+          <div class="export-actions">
+            <button class="export-btn" id="btn-open-ext" title="Open with...">Open With...</button>
+            <button class="export-btn" id="btn-open-jpeg" title="Open full JPEG">Open JPEG</button>
+          </div>
+        </div>
+
+        <div class="meta-section">
+          <h4>File</h4>
+          <div class="meta-row"><span class="label">Name</span><span class="val" id="m-name">—</span></div>
+          <div class="meta-row"><span class="label">Date</span><span class="val" id="m-date">—</span></div>
+          <div class="meta-row"><span class="label">Volume</span><span class="val" id="m-volume">—</span></div>
+          <div class="meta-row"><span class="label">Size</span><span class="val" id="m-size">—</span></div>
+        </div>
+
+        <div class="meta-section">
+          <h4>Camera</h4>
+          <div class="meta-row"><span class="label">Body</span><span class="val" id="m-camera">—</span></div>
+          <div class="meta-row"><span class="label">Lens</span><span class="val" id="m-lens">—</span></div>
+          <div class="meta-row"><span class="label">Mount</span><span class="val" id="m-mount">—</span></div>
+        </div>
+
+        <div class="meta-section">
+          <h4>Exposure</h4>
+          <div class="meta-row"><span class="label">Aperture</span><span class="val" id="m-aperture">—</span></div>
+          <div class="meta-row"><span class="label">Shutter</span><span class="val" id="m-shutter">—</span></div>
+          <div class="meta-row"><span class="label">ISO</span><span class="val" id="m-iso">—</span></div>
+          <div class="meta-row"><span class="label">Focal</span><span class="val" id="m-focal">—</span></div>
+          <div class="meta-row"><span class="label">EV</span><span class="val" id="m-ev">—</span></div>
+        </div>
+
+        <div class="meta-section">
+          <h4>Image</h4>
+          <div class="meta-row"><span class="label">Dimensions</span><span class="val" id="m-dims">—</span></div>
+          <div class="meta-row"><span class="label">Time of day</span><span class="val" id="m-tod">—</span></div>
+          <div class="meta-row"><span class="label">Season</span><span class="val" id="m-season">—</span></div>
+        </div>
+
+        <div class="meta-section">
+          <h4>Sidecars</h4>
+          <div class="meta-row"><span class="label">XMP</span><span class="val" id="m-xmp">—</span></div>
+          <div class="meta-row"><span class="label">JPEG pair</span><span class="val" id="m-jpeg">—</span></div>
+          <div class="meta-row"><span class="label">ON1</span><span class="val" id="m-on1">—</span></div>
+          <div class="meta-row"><span class="label">Radiant</span><span class="val" id="m-radiant">—</span></div>
+        </div>
+
+        <div class="meta-section">
+          <h4>Triptych</h4>
+          <div class="meta-row"><span class="label">Leg</span><span class="val" id="m-tleg">—</span></div>
+          <div class="meta-row"><span class="label">Arc</span><span class="val" id="m-arc">—</span></div>
+          <div class="meta-row"><span class="label">Location</span><span class="val" id="m-loc">—</span></div>
+        </div>
+
+        <div class="meta-section" id="ai-section">
+          <h4>AI</h4>
+          <div id="m-ai-desc" class="ai-desc">—</div>
+          <div id="m-ai-keywords" class="ai-keywords"></div>
+        </div>
+
+      </div>
+    </div>
+
+  </div>
+
+  <!-- Keyboard hints -->
+  <div id="kb-hints">
+    <div class="kb"><span class="key">←→</span> Navigate</div>
+    <div class="kb"><span class="key">1–5</span> Rate</div>
+    <div class="kb"><span class="key">P</span> Pick</div>
+    <div class="kb"><span class="key">X</span> Reject</div>
+    <div class="kb"><span class="key">U</span> Unmark</div>
+    <div class="kb"><span class="key">S</span> Selkie</div>
+    <div class="kb"><span class="key">Space</span> Grid/Review</div>
+    <div class="kb"><span class="key">F</span> Filters</div>
+    <div class="kb"><span class="key">/</span> Search</div>
+    <div class="kb"><span class="key">0</span> Clear rating</div>
+  </div>
+
+</div>
+
+<!-- Toast -->
+<div id="toast"></div>
+
+<script>
+'use strict';
+
+// Use same-origin so the SPA works with `dam serve` on any port (incl. PyInstaller binary).
+const API = window.location.origin;
+
+/* ── State ────────────────────────────────────────────────────────────────── */
+const state = {
+  images:      [],       // loaded image objects
+  cursor:      null,     // { date, id } for next page
+  total:       0,
+  loading:     false,
+  idx:         0,        // current review index
+  view:        'review', // 'review' | 'grid'
+  filters:     {
+    camera:      null,
+    volume:      null,
+    rating_min:  0,
+    rating_max:  5,
+    pick:        null,
+    edit_status: null,
+    triptych_leg:null,
+    date_from:   null,
+    date_to:     null,
+    is_selkie:   false,
+  },
+  filterMeta: null,  // data from /api/filters
+  searchQuery: null, // active semantic search query (null = normal mode)
+};
+
+/* ── Helpers ──────────────────────────────────────────────────────────────── */
+function qs(sel)  { return document.querySelector(sel); }
+function el(id)   { return document.getElementById(id); }
+
+function toast(msg, dur=1500) {
+  const t = el('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  clearTimeout(t._timer);
+  t._timer = setTimeout(() => t.classList.remove('show'), dur);
+}
+
+function fmtSize(bytes) {
+  if (!bytes) return '—';
+  return bytes > 1e6 ? (bytes/1e6).toFixed(1)+' MB' : Math.round(bytes/1024)+' KB';
+}
+
+function fmtDate(iso) {
+  if (!iso) return '—';
+  return iso.replace('T', ' ').substring(0, 16);
+}
+
+function buildQuery(extra={}) {
+  const f = state.filters;
+  const p = new URLSearchParams();
+  if (f.camera)       p.set('camera',       f.camera);
+  if (f.volume)       p.set('volume',       f.volume);
+  if (f.rating_min > 0) p.set('rating_min', f.rating_min);
+  if (f.rating_max < 5) p.set('rating_max', f.rating_max);
+  if (f.pick)         p.set('pick',         f.pick);
+  if (f.edit_status)  p.set('edit_status',  f.edit_status);
+  if (f.triptych_leg) p.set('triptych_leg', f.triptych_leg);
+  if (f.date_from)    p.set('date_from',    f.date_from);
+  if (f.date_to)      p.set('date_to',      f.date_to);
+  if (f.is_selkie)    p.set('is_selkie',    'true');
+  Object.entries(extra).forEach(([k,v]) => p.set(k, v));
+  return p;
+}
+
+/* ── API calls ────────────────────────────────────────────────────────────── */
+async function loadImages(reset=false) {
+  if (state.loading) return;
+  if (!reset && state.cursor === null && state.images.length > 0) return;
+
+  state.loading = true;
+  el('loading-overlay').classList.remove('hidden');
+
+  try {
+    const extra = {};
+    if (!reset && state.cursor) {
+      extra.cursor_date = state.cursor.date;
+      extra.cursor_id   = state.cursor.id;
+    }
+    const q = buildQuery(extra);
+    const r = await fetch(`${API}/api/images?${q}`);
+    const d = await r.json();
+
+    if (reset) {
+      state.images = d.images;
+      state.idx    = 0;
+    } else {
+      state.images.push(...d.images);
+    }
+    state.cursor = d.next_cursor;
+    state.total  = d.total_filtered;
+
+    el('tb-count').textContent =
+      `${state.images.length.toLocaleString()} / ${state.total.toLocaleString()}`;
+
+    if (reset) {
+      renderGrid(true);
+      renderReview();
+    } else {
+      appendGrid(d.images);
+    }
+    updateLoadMore();
+  } catch(e) {
+    console.error('loadImages failed:', e);
+    toast('Failed to load images');
+  } finally {
+    state.loading = false;
+    el('loading-overlay').classList.add('hidden');
+  }
+}
+
+async function patchImage(id, data) {
+  try {
+    const r = await fetch(`${API}/api/images/${id}`, {
+      method: 'PATCH',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify(data),
+    });
+    if (!r.ok) { const e = await r.json(); throw new Error(e.error); }
+    const updated = await r.json();
+    // Patch in-place in state
+    const i = state.images.findIndex(img => img.id === id);
+    if (i >= 0) state.images[i] = updated;
+    return updated;
+  } catch(e) {
+    toast('Save failed: ' + e.message);
+    return null;
+  }
+}
+
+async function loadFilters() {
+  try {
+    const r = await fetch(`${API}/api/filters`);
+    state.filterMeta = await r.json();
+    buildFilterPanel();
+  } catch(e) {
+    console.error('loadFilters failed:', e);
+  }
+}
+
+/* ── Semantic search ──────────────────────────────────────────────────────── */
+async function searchImages(query) {
+  if (!query || !query.trim()) {
+    clearSearch();
+    return;
+  }
+  state.loading = true;
+  state.searchQuery = query.trim();
+  el('loading-overlay').classList.remove('hidden');
+  el('search-input').classList.add('active');
+  el('search-clear').classList.add('visible');
+
+  try {
+    const p = new URLSearchParams();
+    p.set('q', state.searchQuery);
+    const r = await fetch(`${API}/api/search?${p}`);
+    const d = await r.json();
+
+    if (d.error) {
+      toast('Search failed: ' + d.error);
+      return;
+    }
+
+    state.images = d.images;
+    state.cursor = null;  // search results are not paginated
+    state.total  = d.total_filtered;
+    state.idx    = 0;
+
+    el('tb-count').textContent =
+      `${state.images.length} results for "${state.searchQuery}"`;
+
+    renderGrid(true);
+    renderReview();
+    updateLoadMore();
+  } catch(e) {
+    console.error('searchImages failed:', e);
+    toast('Search failed');
+  } finally {
+    state.loading = false;
+    el('loading-overlay').classList.add('hidden');
+  }
+}
+
+function clearSearch() {
+  state.searchQuery = null;
+  el('search-input').value = '';
+  el('search-input').classList.remove('active');
+  el('search-clear').classList.remove('visible');
+  reload();
+}
+
+/* ── Filter panel ─────────────────────────────────────────────────────────── */
+function buildFilterPanel() {
+  const fm = state.filterMeta;
+  if (!fm) return;
+
+  buildChips('chip-cameras',  fm.cameras,       'camera');
+  buildChips('chip-volumes',  fm.volumes,        'volume');
+  buildChips('chip-picks',    fm.pick_values,    'pick',        true);
+  buildChips('chip-status',   fm.edit_status_values, 'edit_status');
+  buildChips('chip-triptych', fm.triptych_legs,  'triptych_leg');
+
+  if (fm.date_min) el('date-from').value = fm.date_min.substring(0,10);
+  if (fm.date_max) el('date-to').value   = fm.date_max.substring(0,10);
+
+  // Sync date inputs to state
+  state.filters.date_from = fm.date_min ? fm.date_min.substring(0,10) : null;
+  state.filters.date_to   = fm.date_max ? fm.date_max.substring(0,10) : null;
+}
+
+function buildChips(containerId, values, filterKey, pickStyle=false) {
+  const c = el(containerId);
+  c.innerHTML = '';
+  values.forEach(v => {
+    const chip = document.createElement('span');
+    chip.className = 'chip';
+    chip.textContent = v;
+    chip.dataset.val = v;
+    chip.dataset.key = filterKey;
+    chip.addEventListener('click', () => {
+      const cur = state.filters[filterKey];
+      state.filters[filterKey] = cur === v ? null : v;
+      refreshChips(containerId, filterKey, pickStyle);
+      reload();
+    });
+    c.appendChild(chip);
+  });
+  refreshChips(containerId, filterKey, pickStyle);
+}
+
+function refreshChips(containerId, filterKey, pickStyle=false) {
+  el(containerId).querySelectorAll('.chip').forEach(chip => {
+    const active = state.filters[filterKey] === chip.dataset.val;
+    chip.classList.remove('active','pick-active','reject-active');
+    if (active) {
+      if (pickStyle && chip.dataset.val === 'pick')   chip.classList.add('pick-active');
+      else if (pickStyle && chip.dataset.val === 'reject') chip.classList.add('reject-active');
+      else chip.classList.add('active');
+    }
+  });
+}
+
+function syncSelkieChip() {
+  el('chip-selkie').classList.toggle('active', state.filters.is_selkie);
+}
+
+/* ── Grid rendering ───────────────────────────────────────────────────────── */
+function renderGrid(reset=false) {
+  const grid = el('grid-view');
+  const footer = el('grid-footer');
+  if (reset) {
+    // Remove all thumb cells
+    grid.querySelectorAll('.thumb-cell').forEach(c => c.remove());
+  }
+  appendGrid(state.images);
+  footer.style.display = state.cursor ? '' : 'none';
+}
+
+function appendGrid(images) {
+  const grid   = el('grid-view');
+  const footer = el('grid-footer');
+  images.forEach((img, i) => {
+    const absIdx = state.images.indexOf(img);
+    const cell = document.createElement('div');
+    cell.className = 'thumb-cell';
+    cell.dataset.id  = img.id;
+    cell.dataset.idx = absIdx;
+
+    if (img.pick === 'pick')   cell.classList.add('pick');
+    if (img.pick === 'reject') cell.classList.add('reject');
+    if (absIdx === state.idx)  cell.classList.add('active');
+
+    const imgEl = document.createElement('img');
+    imgEl.loading = 'lazy';
+    imgEl.src = `${API}/api/thumbs/${img.id}.jpg`;
+    imgEl.onerror = () => {
+      imgEl.style.display = 'none';
+      const ph = document.createElement('div');
+      ph.className = 'no-thumb';
+      ph.textContent = img.file_type || '?';
+      cell.appendChild(ph);
+    };
+    cell.appendChild(imgEl);
+
+    if (img.rating > 0) {
+      const dots = document.createElement('div');
+      dots.className = 'rating-dots';
+      for (let d=0; d<img.rating; d++) {
+        const dot = document.createElement('div');
+        dot.className = 'rating-dot';
+        dots.appendChild(dot);
+      }
+      cell.appendChild(dots);
+    }
+
+    if (img.pick !== 'unmarked') {
+      const flag = document.createElement('div');
+      flag.className = `pick-flag ${img.pick}`;
+      cell.appendChild(flag);
+    }
+
+    cell.addEventListener('click', () => {
+      state.idx = absIdx;
+      setView('review');
+      renderReview();
+      updateGridActive();
+    });
+
+    // Insert before footer
+    grid.insertBefore(cell, footer);
+  });
+}
+
+function updateGridActive() {
+  el('grid-view').querySelectorAll('.thumb-cell').forEach(c => {
+    c.classList.toggle('active', parseInt(c.dataset.idx) === state.idx);
+  });
+}
+
+function updateLoadMore() {
+  const btn = el('load-more');
+  btn.disabled = !state.cursor || state.loading;
+  btn.textContent = state.cursor
+    ? `Load more (${(state.total - state.images.length).toLocaleString()} remaining)`
+    : 'All loaded';
+  el('grid-footer').style.display = state.images.length > 0 ? '' : 'none';
+}
+
+/* ── Review rendering ─────────────────────────────────────────────────────── */
+function renderReview() {
+  const img = state.images[state.idx];
+  if (!img) {
+    el('review-img').style.display = 'none';
+    el('review-no-thumb').style.display = '';
+    clearMeta();
+    return;
+  }
+
+  // Image
+  const ri = el('review-img');
+  ri.style.display = '';
+  el('review-no-thumb').style.display = 'none';
+  ri.classList.add('loading');
+  ri.onload  = () => ri.classList.remove('loading');
+  ri.onerror = () => {
+    ri.style.display = 'none';
+    el('review-no-thumb').style.display = '';
+  };
+  ri.src = `${API}/api/thumbs/${img.id}.jpg`;
+
+  // Workflow
+  renderStars(img.rating || 0);
+  renderPicks(img.pick || 'unmarked');
+  renderSelkie(img.is_selkie);
+
+  // Meta
+  el('m-name').textContent    = img.file_name || '—';
+  el('m-date').textContent    = fmtDate(img.date_taken);
+  el('m-volume').textContent  = img.volume || '—';
+  el('m-size').textContent    = fmtSize(img.file_size);
+  el('m-camera').textContent  = img.camera_short || img.camera_model || '—';
+  el('m-lens').textContent    = img.lens_model || '—';
+  el('m-mount').textContent   = img.mount || '—';
+  el('m-aperture').textContent= img.aperture ? `ƒ/${img.aperture}` : '—';
+  el('m-shutter').textContent = img.shutter_speed || '—';
+  el('m-iso').textContent     = img.iso ? `ISO ${img.iso}` : '—';
+  el('m-focal').textContent   = img.focal_length ? `${img.focal_length}mm` : '—';
+  el('m-ev').textContent      = img.exposure_comp != null ? `${img.exposure_comp > 0?'+':''}${img.exposure_comp}` : '—';
+  el('m-dims').textContent    = (img.width && img.height) ? `${img.width}×${img.height}` : '—';
+  el('m-tod').textContent     = img.time_of_day || '—';
+  el('m-season').textContent  = img.season || '—';
+  el('m-xmp').textContent     = img.has_xmp ? '✓' : '—';
+  el('m-jpeg').textContent    = img.has_jpeg ? '✓' : '—';
+  el('m-on1').textContent     = img.has_on1 ? '✓' : '—';
+  el('m-radiant').textContent = img.has_radiant ? '✓' : '—';
+  el('m-tleg').textContent    = img.triptych_leg || '—';
+  el('m-arc').textContent     = img.narrative_arc || '—';
+  el('m-loc').textContent     = img.location_type || '—';
+
+  // AI
+  el('m-ai-desc').textContent = img.ai_description || '—';
+  const kwBox = el('m-ai-keywords');
+  kwBox.innerHTML = '';
+  if (img.keywords && img.keywords.length) {
+    img.keywords.forEach(kw => {
+      const chip = document.createElement('span');
+      chip.className = 'ai-kw';
+      chip.textContent = kw;
+      kwBox.appendChild(chip);
+    });
+  }
+}
+
+function clearMeta() {
+  ['m-name','m-date','m-volume','m-size','m-camera','m-lens','m-mount',
+   'm-aperture','m-shutter','m-iso','m-focal','m-ev','m-dims','m-tod',
+   'm-season','m-xmp','m-jpeg','m-on1','m-radiant','m-tleg','m-arc','m-loc'
+  ].forEach(id => el(id).textContent = '—');
+  el('m-ai-desc').textContent = '—';
+  el('m-ai-keywords').innerHTML = '';
+}
+
+function renderStars(rating) {
+  el('wf-stars').querySelectorAll('.star').forEach(s => {
+    s.classList.toggle('lit', parseInt(s.dataset.v) <= rating);
+  });
+}
+
+function renderPicks(pick) {
+  ['btn-pick','btn-unmark','btn-reject'].forEach(id => {
+    const btn = el(id);
+    btn.classList.remove('active-pick','active-reject','active-unmarked');
+  });
+  if (pick === 'pick')     el('btn-pick').classList.add('active-pick');
+  if (pick === 'reject')   el('btn-reject').classList.add('active-reject');
+  if (pick === 'unmarked') el('btn-unmark').classList.add('active-unmarked');
+}
+
+function renderSelkie(val) {
+  el('wf-selkie').classList.toggle('active', !!val);
+}
+
+/* ── Workflow actions ─────────────────────────────────────────────────────── */
+async function setRating(val) {
+  const img = state.images[state.idx];
+  if (!img) return;
+  const newVal = img.rating === val ? 0 : val;
+  const updated = await patchImage(img.id, { rating: newVal });
+  if (updated) { renderReview(); updateGridCell(img.id); toast(`★ ${newVal || 'cleared'}`); }
+}
+
+async function setPick(val) {
+  const img = state.images[state.idx];
+  if (!img) return;
+  const newVal = img.pick === val ? 'unmarked' : val;
+  const updated = await patchImage(img.id, { pick: newVal });
+  if (updated) { renderReview(); updateGridCell(img.id); toast(newVal); }
+}
+
+async function toggleSelkie() {
+  const img = state.images[state.idx];
+  if (!img) return;
+  const updated = await patchImage(img.id, { is_selkie: !img.is_selkie });
+  if (updated) { renderReview(); toast(updated.is_selkie ? '★ Selkie set' : 'Selkie cleared'); }
+}
+
+async function openExternalApp(app = null) {
+  const img = state.images[state.idx];
+  if (!img) return;
+  toast('Opening external editor...');
+  try {
+    const payload = app ? { app } : {};
+    const r = await fetch(`${API}/api/images/${img.id}/open_external`, {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify(payload)
+    });
+    if (!r.ok) { const e = await r.json(); throw new Error(e.error); }
+  } catch(e) {
+    toast('Error: ' + e.message);
+  }
+}
+
+async function openJpeg() {
+  const img = state.images[state.idx];
+  if (!img) return;
+  toast('Opening full JPEG...');
+  try {
+    const r = await fetch(`${API}/api/images/${img.id}/open_jpeg`, { method: 'POST' });
+    if (!r.ok) { const e = await r.json(); throw new Error(e.error); }
+  } catch(e) {
+    toast('Error: ' + e.message);
+  }
+}
+
+function updateGridCell(imgId) {
+  const img = state.images.find(i => i.id === imgId);
+  if (!img) return;
+  const cell = el('grid-view').querySelector(`[data-id="${imgId}"]`);
+  if (!cell) return;
+  cell.classList.toggle('pick',   img.pick === 'pick');
+  cell.classList.toggle('reject', img.pick === 'reject');
+  // Update rating dots
+  cell.querySelectorAll('.rating-dot,.rating-dots').forEach(e => e.remove());
+  if (img.rating > 0) {
+    const dots = document.createElement('div');
+    dots.className = 'rating-dots';
+    for (let d=0; d<img.rating; d++) {
+      const dot = document.createElement('div'); dot.className = 'rating-dot';
+      dots.appendChild(dot);
+    }
+    cell.appendChild(dots);
+  }
+  cell.querySelectorAll('.pick-flag').forEach(e => e.remove());
+  if (img.pick !== 'unmarked') {
+    const flag = document.createElement('div');
+    flag.className = `pick-flag ${img.pick}`;
+    cell.appendChild(flag);
+  }
+}
+
+/* ── Navigation ───────────────────────────────────────────────────────────── */
+function navigate(delta) {
+  const next = state.idx + delta;
+  if (next < 0 || next >= state.images.length) return;
+  state.idx = next;
+  renderReview();
+  updateGridActive();
+  // Prefetch next page when near end
+  if (next >= state.images.length - 10 && state.cursor) {
+    loadImages(false);
+  }
+}
+
+/* ── View switching ───────────────────────────────────────────────────────── */
+function setView(v) {
+  state.view = v;
+  el('review-view').classList.toggle('hidden', v !== 'review');
+  el('grid-view').classList.toggle('hidden',   v !== 'grid');
+  el('btn-review').classList.toggle('active',  v === 'review');
+  el('btn-grid').classList.toggle('active',    v === 'grid');
+}
+
+/* ── Filter reload ────────────────────────────────────────────────────────── */
+function reload() {
+  state.cursor = null;
+  state.images = [];
+  loadImages(true);
+}
+
+/* ── Keyboard ─────────────────────────────────────────────────────────────── */
+document.addEventListener('keydown', e => {
+  // Don't capture when typing in inputs
+  if (['INPUT','SELECT','TEXTAREA'].includes(e.target.tagName)) return;
+
+  switch(e.key) {
+    case 'ArrowLeft':  e.preventDefault(); navigate(-1); break;
+    case 'ArrowRight': e.preventDefault(); navigate(+1); break;
+    case '1': setRating(1); break;
+    case '2': setRating(2); break;
+    case '3': setRating(3); break;
+    case '4': setRating(4); break;
+    case '5': setRating(5); break;
+    case '0': setRating(0); break;
+    case 'p': case 'P': setPick('pick');   break;
+    case 'x': case 'X': setPick('reject'); break;
+    case 'u': case 'U': setPick('unmarked'); break;
+    case 's': case 'S': toggleSelkie(); break;
+    case ' ':
+      e.preventDefault();
+      setView(state.view === 'review' ? 'grid' : 'review');
+      break;
+    case 'f': case 'F':
+      el('filter-panel').classList.toggle('hidden');
+      break;
+    case '/':
+      e.preventDefault();
+      el('search-input').focus();
+      break;
+  }
+});
+
+/* ── Event wiring ─────────────────────────────────────────────────────────── */
+el('btn-review').addEventListener('click', () => setView('review'));
+el('btn-grid').addEventListener('click',   () => setView('grid'));
+el('btn-filters').addEventListener('click',() => el('filter-panel').classList.toggle('hidden'));
+
+el('review-nav-prev').addEventListener('click', () => navigate(-1));
+el('review-nav-next').addEventListener('click', () => navigate(+1));
+
+// Search
+el('search-input').addEventListener('keydown', e => {
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    searchImages(el('search-input').value);
+    el('search-input').blur();
+  }
+  if (e.key === 'Escape') {
+    e.preventDefault();
+    clearSearch();
+    el('search-input').blur();
+  }
+});
+el('search-clear').addEventListener('click', clearSearch);
+
+el('load-more').addEventListener('click', () => loadImages(false));
+
+// Stars
+el('wf-stars').querySelectorAll('.star').forEach(s => {
+  s.addEventListener('click', () => setRating(parseInt(s.dataset.v)));
+});
+
+// Pick buttons
+['btn-pick','btn-unmark','btn-reject'].forEach(id => {
+  el(id).addEventListener('click', () => setPick(el(id).dataset.v));
+});
+
+el('wf-selkie').addEventListener('click', toggleSelkie);
+
+el('btn-open-ext').addEventListener('click', () => {
+  // Simple prompt for now, could be upgraded to a fancy modal later
+  const app = prompt("Enter application name (e.g., 'Affinity Photo', 'Lightroom'), or leave blank for default 'Open With' dialog:");
+  if (app !== null) {
+    openExternalApp(app.trim() || null);
+  }
+});
+el('btn-open-jpeg').addEventListener('click', openJpeg);
+
+// Rating range
+el('rating-min').addEventListener('input', () => {
+  let v = parseInt(el('rating-min').value);
+  if (v > parseInt(el('rating-max').value)) v = parseInt(el('rating-max').value);
+  el('rating-min').value = v;
+  el('rating-min-val').textContent = v;
+  state.filters.rating_min = v;
+  reload();
+});
+el('rating-max').addEventListener('input', () => {
+  let v = parseInt(el('rating-max').value);
+  if (v < parseInt(el('rating-min').value)) v = parseInt(el('rating-min').value);
+  el('rating-max').value = v;
+  el('rating-max-val').textContent = v;
+  state.filters.rating_max = v;
+  reload();
+});
+
+// Date inputs
+el('date-from').addEventListener('change', () => {
+  state.filters.date_from = el('date-from').value || null;
+  reload();
+});
+el('date-to').addEventListener('change', () => {
+  state.filters.date_to = el('date-to').value || null;
+  reload();
+});
+
+// Selkie chip
+el('chip-selkie').addEventListener('click', () => {
+  state.filters.is_selkie = !state.filters.is_selkie;
+  syncSelkieChip();
+  reload();
+});
+
+// Reset filters
+el('btn-reset-filters').addEventListener('click', () => {
+  state.filters = {
+    camera: null, volume: null,
+    rating_min: 0, rating_max: 5,
+    pick: null, edit_status: null, triptych_leg: null,
+    date_from: null, date_to: null, is_selkie: false,
+  };
+  el('rating-min').value = 0; el('rating-min-val').textContent = 0;
+  el('rating-max').value = 5; el('rating-max-val').textContent = 5;
+  if (state.filterMeta) {
+    if (state.filterMeta.date_min) el('date-from').value = state.filterMeta.date_min.substring(0,10);
+    if (state.filterMeta.date_max) el('date-to').value   = state.filterMeta.date_max.substring(0,10);
+  }
+  ['chip-cameras','chip-volumes','chip-picks','chip-status','chip-triptych'].forEach(id => {
+    el(id).querySelectorAll('.chip').forEach(c =>
+      c.classList.remove('active','pick-active','reject-active'));
+  });
+  syncSelkieChip();
+  reload();
+});
+
+/* ── Background Polling ───────────────────────────────────────────────────── */
+async function pollIngestStatus() {
+  try {
+    const r = await fetch(`${API}/api/ingest/status`);
+    if (!r.ok) return;
+    const d = await r.json();
+    
+    const ui = el('ingest-progress');
+    if (d.status === 'idle' || d.status === 'error' || !d.status) {
+      ui.classList.remove('active');
+    } else {
+      ui.classList.add('active');
+      const pct = d.total > 0 ? Math.floor((d.current / d.total) * 100) : 0;
+      el('ingest-pct').textContent = `${pct}%`;
+      el('ingest-bar').style.width = `${pct}%`;
+      el('ingest-label').textContent = d.status === 'scanning' ? 'Scanning...' : `Copying ${d.current}/${d.total}`;
+    }
+  } catch(e) {}
+}
+
+
+/* ── Init ─────────────────────────────────────────────────────────────────── */
+(async () => {
+  await loadFilters();
+  await loadImages(true);
+  
+  // Start polling
+  setInterval(pollIngestStatus, 2000);
+  pollIngestStatus();
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,75 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.backends._legacy:_Backend"
+
+[project]
+name = "dam"
+version = "0.1.0"
+description = "Personal photo Digital Asset Management system"
+requires-python = ">=3.12"
+dependencies = [
+    "flask>=3.0",
+    "sqlite-vec>=0.1.0",
+    "pywebview>=5.0.0",
+    "tqdm>=4.60",
+]
+
+[project.optional-dependencies]
+serve = ["gunicorn>=21.0"]
+dev = [
+    "pytest>=7.0",
+    "ruff>=0.4",
+]
+
+[project.scripts]
+dam = "dam_runner:main"
+
+[tool.setuptools]
+py-modules = [
+    "dam",
+    "dam_runner",
+    "dam_config",
+    "dam_db",
+    "dam_schema",
+    "dam_api",
+    "dam_scanner",
+    "dam_tagger",
+    "card_ingest",
+    "card_watcher",
+]
+
+[tool.setuptools.package-data]
+"*" = ["static/**"]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 120
+
+[tool.ruff.lint]
+select = [
+    "E",    # pycodestyle errors
+    "W",    # pycodestyle warnings
+    "F",    # pyflakes
+    "I",    # isort
+    "UP",   # pyupgrade
+    "B",    # flake8-bugbear
+    "SIM",  # flake8-simplify
+    "RUF",  # ruff-specific rules
+]
+ignore = [
+    "E501",   # line too long (handled by formatter)
+    "E741",   # ambiguous variable name (l, O, I)
+    "B007",   # unused loop variable
+    "B008",   # function call in default argument
+    "SIM108", # ternary operator (readability preference)
+    "SIM113", # enumerate suggestion (doesn't apply to step-based range loops)
+    "UP015",  # unnecessary open mode parameter
+    "RUF012", # mutable class attributes (not using dataclasses)
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["dam_config", "dam_db", "dam_schema", "dam_api", "dam_scanner", "dam_tagger", "card_ingest", "card_watcher"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]

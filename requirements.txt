@@ -1,0 +1,12 @@
+# DAM — core dependencies (install with: pip install -r requirements.txt)
+flask>=3.0
+sqlite-vec>=0.1.0
+
+# Optional: production web server for `dam serve`
+# gunicorn>=21.0
+
+# Desktop window wrapper
+pywebview>=5.0.0
+
+# Testing
+pytest>=7.0
