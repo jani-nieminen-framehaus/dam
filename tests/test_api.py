@@ -334,3 +334,81 @@ def test_patch_narrative_arc(tmp_dam_root, app_client):
     )
     assert resp.status_code == 200
     assert resp.get_json()["narrative_arc"] == "middle"
+
+
+# ── Filter by new fields ─────────────────────────────────────────────────────
+
+
+def test_filter_by_color_label(tmp_dam_root, app_client):
+    img_id = _insert_test_image(tmp_dam_root)
+    app_client.patch(
+        f"/api/images/{img_id}",
+        json={"color_label": "green"},
+        content_type="application/json",
+    )
+    # Filter matches
+    resp = app_client.get("/api/images?color_label=green")
+    assert resp.status_code == 200
+    assert len(resp.get_json()["images"]) == 1
+
+    # Filter doesn't match
+    resp = app_client.get("/api/images?color_label=red")
+    assert len(resp.get_json()["images"]) == 0
+
+
+def test_filter_by_project(tmp_dam_root, app_client):
+    img_id = _insert_test_image(tmp_dam_root)
+    app_client.post(
+        f"/api/images/{img_id}/projects",
+        json={"name": "triptych"},
+        content_type="application/json",
+    )
+    resp = app_client.get("/api/images?project=triptych")
+    assert resp.status_code == 200
+    assert len(resp.get_json()["images"]) == 1
+
+    resp = app_client.get("/api/images?project=street")
+    assert len(resp.get_json()["images"]) == 0
+
+
+def test_filter_by_subject(tmp_dam_root, app_client):
+    img_id = _insert_test_image(tmp_dam_root)
+    app_client.post(
+        f"/api/images/{img_id}/subjects",
+        json={"name": "Jorma"},
+        content_type="application/json",
+    )
+    resp = app_client.get("/api/images?subject=Jorma")
+    assert resp.status_code == 200
+    assert len(resp.get_json()["images"]) == 1
+
+    resp = app_client.get("/api/images?subject=Heidi")
+    assert len(resp.get_json()["images"]) == 0
+
+
+def test_filter_combined_subject_camera_date(tmp_dam_root, app_client):
+    """The taxonomy's example: 'every frame of Jorma from the Nikon, December 2025'."""
+    import sqlite3
+
+    import dam_config
+
+    conn = sqlite3.connect(str(dam_config.DB_PATH))
+    conn.execute(
+        "INSERT INTO images (file_path, file_name, file_type, camera_short, date_taken) "
+        "VALUES ('/test/DSC001.NEF', 'DSC001.NEF', 'NEF', 'Zf', '2025-12-15T14:30:00')"
+    )
+    conn.commit()
+    img_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+    conn.close()
+
+    app_client.post(
+        f"/api/images/{img_id}/subjects",
+        json={"name": "Jorma"},
+        content_type="application/json",
+    )
+
+    resp = app_client.get("/api/images?subject=Jorma&camera=Zf&date_from=2025-12-01&date_to=2025-12-31")
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert len(data["images"]) == 1
+    assert data["images"][0]["camera_short"] == "Zf"

@@ -482,8 +482,33 @@
       </div>
 
       <div class="filter-group">
+        <label>Color Label</label>
+        <div class="filter-chips" id="chip-colors"></div>
+      </div>
+
+      <div class="filter-group">
         <label>Triptych Leg</label>
         <div class="filter-chips" id="chip-triptych"></div>
+      </div>
+
+      <div class="filter-group">
+        <label>Narrative Arc</label>
+        <div class="filter-chips" id="chip-arc"></div>
+      </div>
+
+      <div class="filter-group">
+        <label>Location Type</label>
+        <div class="filter-chips" id="chip-location"></div>
+      </div>
+
+      <div class="filter-group">
+        <label>Project</label>
+        <div class="filter-chips" id="chip-projects"></div>
+      </div>
+
+      <div class="filter-group">
+        <label>Subject</label>
+        <div class="filter-chips" id="chip-subjects"></div>
       </div>
 
       <div class="filter-group">
@@ -727,6 +752,11 @@ const state = {
     pick:        null,
     edit_status: null,
     triptych_leg:null,
+    color_label: null,
+    narrative_arc:null,
+    location_type:null,
+    project:     null,
+    subject:     null,
     date_from:   null,
     date_to:     null,
     is_selkie:   false,
@@ -768,6 +798,11 @@ function buildQuery(extra={}) {
   if (f.pick)         p.set('pick',         f.pick);
   if (f.edit_status)  p.set('edit_status',  f.edit_status);
   if (f.triptych_leg) p.set('triptych_leg', f.triptych_leg);
+  if (f.color_label)  p.set('color_label',  f.color_label);
+  if (f.narrative_arc)p.set('narrative_arc', f.narrative_arc);
+  if (f.location_type)p.set('location_type', f.location_type);
+  if (f.project)      p.set('project',      f.project);
+  if (f.subject)      p.set('subject',      f.subject);
   if (f.date_from)    p.set('date_from',    f.date_from);
   if (f.date_to)      p.set('date_to',      f.date_to);
   if (f.is_selkie)    p.set('is_selkie',    'true');
@@ -910,7 +945,12 @@ function buildFilterPanel() {
   buildChips('chip-volumes',  fm.volumes,        'volume');
   buildChips('chip-picks',    fm.pick_values,    'pick',        true);
   buildChips('chip-status',   fm.edit_status_values, 'edit_status');
-  buildChips('chip-triptych', fm.triptych_legs,  'triptych_leg');
+  buildChips('chip-colors',   fm.color_values,       'color_label');
+  buildChips('chip-triptych', fm.triptych_legs,      'triptych_leg');
+  buildChips('chip-arc',      fm.narrative_values,    'narrative_arc');
+  buildChips('chip-location', fm.location_types || [], 'location_type');
+  buildChips('chip-projects', fm.projects || [],      'project');
+  buildChips('chip-subjects', fm.subjects || [],      'subject');
 
   if (fm.date_min) el('date-from').value = fm.date_min.substring(0,10);
   if (fm.date_max) el('date-to').value   = fm.date_max.substring(0,10);
@@ -1680,6 +1720,8 @@ el('btn-reset-filters').addEventListener('click', () => {
     camera: null, volume: null,
     rating_min: 0, rating_max: 5,
     pick: null, edit_status: null, triptych_leg: null,
+    color_label: null, narrative_arc: null, location_type: null,
+    project: null, subject: null,
     date_from: null, date_to: null, is_selkie: false,
   };
   el('rating-min').value = 0; el('rating-min-val').textContent = 0;
@@ -1688,7 +1730,9 @@ el('btn-reset-filters').addEventListener('click', () => {
     if (state.filterMeta.date_min) el('date-from').value = state.filterMeta.date_min.substring(0,10);
     if (state.filterMeta.date_max) el('date-to').value   = state.filterMeta.date_max.substring(0,10);
   }
-  ['chip-cameras','chip-volumes','chip-picks','chip-status','chip-triptych'].forEach(id => {
+  ['chip-cameras','chip-volumes','chip-picks','chip-status','chip-colors',
+   'chip-triptych','chip-arc','chip-location','chip-projects','chip-subjects'
+  ].forEach(id => {
     el(id).querySelectorAll('.chip').forEach(c =>
       c.classList.remove('active','pick-active','reject-active'));
   });

@@ -376,7 +376,6 @@ WHERE pick = 'pick'
 - No pixel editing
 - No sync with C1/LR catalogs (one-way export possible later)
 - No cloud anything
-- No AI auto-tagging (possible future addition with local models)
 
 ## WHAT THIS DOES DO
 
@@ -385,5 +384,27 @@ WHERE pick = 'pick'
 - Know what you've culled and what you haven't
 - Know what's been edited and in which tool
 - Work when drives are offline (metadata + thumbnails cached)
+- AI auto-tagging with local models (LLaVA 34b + Llama 3.1 70b + nomic-embed-text via Ollama)
+- Semantic search across your entire archive ("man standing by window")
+- Full keyboard-driven culling and tagging workflow
+- Bulk operations: multi-select, batch rating/pick/status/delete
 - Zero subscription cost
 - You built it, you own it, you understand it
+
+---
+
+## IMPLEMENTATION STATUS (March 2026)
+
+All three layers of the taxonomy are fully implemented:
+
+- **Layer 1** (Auto-extracted): 30+ EXIF fields via exiftool, sidecar inventory
+- **Layer 2** (Auto-derived): time_of_day, season, camera_short, mount, edited_anywhere, orphan_jpeg
+- **Layer 3** (Manual tags): All fields editable in UI — rating, pick, edit_status, color_label,
+  is_selkie, notes, triptych_leg, narrative_arc, location_type, projects (m2m),
+  subjects (m2m), keywords (m2m)
+- **AI tagging**: Vision descriptions, structured keyword extraction, 768-dim embeddings,
+  burst detection (saves ~150 hours on a 35k image archive)
+- **Filtering**: All manual tag fields are filterable in the SPA filter panel,
+  including project and subject (many-to-many)
+- **Bulk ops**: Multi-select in grid, bulk pick/reject/rate/status/delete
+- **Delete**: Single and bulk delete from DB (files on disk untouched)

@@ -129,6 +129,25 @@ def build_filters(args):
     if v := args.get("triptych_leg"):
         clauses.append("i.triptych_leg = ?")
         params.append(v)
+    if v := args.get("color_label"):
+        clauses.append("i.color_label = ?")
+        params.append(v)
+    if v := args.get("narrative_arc"):
+        clauses.append("i.narrative_arc = ?")
+        params.append(v)
+    if v := args.get("location_type"):
+        clauses.append("i.location_type = ?")
+        params.append(v)
+    if v := args.get("project"):
+        clauses.append(
+            "i.id IN (SELECT ip.image_id FROM image_projects ip JOIN projects p ON ip.project_id = p.id WHERE p.name = ?)"
+        )
+        params.append(v)
+    if v := args.get("subject"):
+        clauses.append(
+            "i.id IN (SELECT isb.image_id FROM image_subjects isb JOIN subjects s ON isb.subject_id = s.id WHERE s.name = ?)"
+        )
+        params.append(v)
     if v := args.get("date_from"):
         clauses.append("i.date_taken >= ?")
         params.append(v)
