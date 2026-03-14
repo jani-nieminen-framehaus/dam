@@ -231,6 +231,96 @@
   .wf-selkie.active { border-color: var(--accent); color: var(--accent); font-weight: 600; }
   .wf-selkie .selkie-star { font-size: 16px; }
 
+  /* Edit status buttons */
+  .wf-status { display: flex; flex-wrap: wrap; gap: 3px; margin-top: 2px; }
+  .status-btn {
+    padding: 3px 6px; border-radius: 3px; font-size: 10px;
+    border: 1px solid var(--border); color: var(--text-dim);
+    cursor: pointer; background: none; transition: all .12s;
+  }
+  .status-btn:hover { border-color: var(--text-mid); color: var(--text); }
+  .status-btn.active { background: var(--bg3); border-color: var(--accent); color: var(--accent); font-weight: 600; }
+
+  /* Color labels */
+  .wf-colors { display: flex; gap: 4px; margin-top: 2px; }
+  .color-dot {
+    width: 16px; height: 16px; border-radius: 50%; cursor: pointer;
+    border: 2px solid transparent; transition: all .12s;
+  }
+  .color-dot:hover { transform: scale(1.2); }
+  .color-dot.active { border-color: #fff; transform: scale(1.2); }
+  .color-dot[data-c="red"]    { background: #e05555; }
+  .color-dot[data-c="yellow"] { background: #d4a843; }
+  .color-dot[data-c="green"]  { background: #4caf82; }
+  .color-dot[data-c="blue"]   { background: #3a7bd5; }
+  .color-dot[data-c="purple"] { background: #9b59b6; }
+  .color-dot[data-c="none"]   { background: var(--bg3); border: 2px solid var(--border); }
+
+  /* Inline select for triptych / arc / location */
+  .wf-select {
+    display: flex; gap: 6px; align-items: center; margin-top: 2px;
+  }
+  .wf-select label { font-size: 10px; color: var(--text-dim); min-width: 36px; text-transform: uppercase; letter-spacing: .05em; }
+  .wf-select select { flex: 1; font-size: 11px; padding: 3px 4px; }
+
+  /* Notes */
+  .wf-notes {
+    margin-top: 2px;
+  }
+  .wf-notes textarea {
+    width: 100%; min-height: 48px; max-height: 120px; resize: vertical;
+    background: var(--bg3); border: 1px solid var(--border); color: var(--text);
+    font: 11px/1.4 inherit; padding: 4px 6px; border-radius: 3px;
+  }
+  .wf-notes textarea:focus { outline: 1px solid var(--accent); }
+
+  /* Tag chips (editable) */
+  .tag-chips { display: flex; flex-wrap: wrap; gap: 4px; }
+  .tag-chip {
+    display: flex; align-items: center; gap: 2px;
+    background: var(--bg3); border: 1px solid var(--border); border-radius: 3px;
+    color: var(--text-mid); font-size: 11px; padding: 2px 4px 2px 6px;
+  }
+  .tag-chip .remove-tag {
+    font-size: 12px; color: var(--text-dim); cursor: pointer; padding: 0 2px;
+    line-height: 1;
+  }
+  .tag-chip .remove-tag:hover { color: var(--reject); }
+  .tag-add-input {
+    width: 80px; font-size: 11px; padding: 2px 4px; border-radius: 3px;
+    background: var(--bg3); border: 1px solid var(--border); color: var(--text);
+  }
+  .tag-add-input:focus { outline: 1px solid var(--accent); width: 120px; }
+
+  /* Delete button */
+  .delete-btn {
+    padding: 6px 0; border-radius: 3px; font-size: 11px;
+    border: 1px solid var(--border); color: var(--text-dim);
+    cursor: pointer; background: none; width: 100%; transition: all .15s;
+    margin-top: 4px;
+  }
+  .delete-btn:hover { border-color: var(--reject); color: var(--reject); }
+
+  /* Bulk action bar */
+  #bulk-bar {
+    display: none; align-items: center; gap: 12px;
+    padding: 6px 12px; background: var(--bg2);
+    border-top: 1px solid var(--border); font-size: 12px;
+    flex-shrink: 0;
+  }
+  #bulk-bar.active { display: flex; }
+  #bulk-bar .bulk-count { color: var(--accent); font-weight: 600; }
+  .bulk-btn {
+    padding: 4px 10px; border-radius: 3px; font-size: 11px;
+    border: 1px solid var(--border); color: var(--text-mid);
+    cursor: pointer; background: none; transition: all .15s;
+  }
+  .bulk-btn:hover { border-color: var(--text-mid); color: var(--text); }
+  .bulk-btn.danger:hover { border-color: var(--reject); color: var(--reject); }
+
+  /* Grid multi-select */
+  .thumb-cell.selected { border-color: var(--sel); }
+
   /* Export / Open actions */
   .export-actions { display: flex; gap: 6px; margin-top: 8px; }
   .export-btn {
@@ -453,11 +543,23 @@
             <span class="selkie-star">★</span>
             <span>Selkie</span>
           </div>
-          
+
+          <div class="wf-status" id="wf-status"></div>
+
+          <div class="wf-colors" id="wf-colors">
+            <div class="color-dot" data-c="red" title="Red"></div>
+            <div class="color-dot" data-c="yellow" title="Yellow"></div>
+            <div class="color-dot" data-c="green" title="Green"></div>
+            <div class="color-dot" data-c="blue" title="Blue"></div>
+            <div class="color-dot" data-c="purple" title="Purple"></div>
+            <div class="color-dot" data-c="none" title="No label"></div>
+          </div>
+
           <div class="export-actions">
             <button class="export-btn" id="btn-open-ext" title="Open with...">Open With...</button>
             <button class="export-btn" id="btn-open-jpeg" title="Open full JPEG">Open JPEG</button>
           </div>
+          <button class="delete-btn" id="btn-delete" title="Delete image from database">Delete from DB</button>
         </div>
 
         <div class="meta-section">
@@ -501,9 +603,46 @@
 
         <div class="meta-section">
           <h4>Triptych</h4>
-          <div class="meta-row"><span class="label">Leg</span><span class="val" id="m-tleg">—</span></div>
-          <div class="meta-row"><span class="label">Arc</span><span class="val" id="m-arc">—</span></div>
-          <div class="meta-row"><span class="label">Location</span><span class="val" id="m-loc">—</span></div>
+          <div class="wf-select">
+            <label>Leg</label>
+            <select id="sel-tleg"><option value="">—</option></select>
+          </div>
+          <div class="wf-select">
+            <label>Arc</label>
+            <select id="sel-arc"><option value="">—</option></select>
+          </div>
+          <div class="wf-select">
+            <label>Loc</label>
+            <select id="sel-loc">
+              <option value="">—</option>
+              <option value="home">home</option>
+              <option value="care_facility">care_facility</option>
+              <option value="hospital">hospital</option>
+              <option value="outdoors">outdoors</option>
+              <option value="transit">transit</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="meta-section">
+          <h4>Projects</h4>
+          <div class="tag-chips" id="tag-projects"></div>
+          <input class="tag-add-input" id="add-project" placeholder="+ project" list="dl-projects">
+          <datalist id="dl-projects"></datalist>
+        </div>
+
+        <div class="meta-section">
+          <h4>Subjects</h4>
+          <div class="tag-chips" id="tag-subjects"></div>
+          <input class="tag-add-input" id="add-subject" placeholder="+ subject" list="dl-subjects">
+          <datalist id="dl-subjects"></datalist>
+        </div>
+
+        <div class="meta-section">
+          <h4>Notes</h4>
+          <div class="wf-notes">
+            <textarea id="wf-notes-text" placeholder="Notes..."></textarea>
+          </div>
         </div>
 
         <div class="meta-section" id="ai-section">
@@ -517,6 +656,35 @@
 
   </div>
 
+  <!-- Bulk action bar -->
+  <div id="bulk-bar">
+    <span class="bulk-count" id="bulk-count">0 selected</span>
+    <button class="bulk-btn" id="bulk-pick">Pick</button>
+    <button class="bulk-btn" id="bulk-reject">Reject</button>
+    <button class="bulk-btn" id="bulk-unmark">Unmark</button>
+    <select id="bulk-rating" style="width:auto; font-size:11px; padding:3px 6px;">
+      <option value="">Rating...</option>
+      <option value="0">★ 0</option>
+      <option value="1">★ 1</option>
+      <option value="2">★ 2</option>
+      <option value="3">★ 3</option>
+      <option value="4">★ 4</option>
+      <option value="5">★ 5</option>
+    </select>
+    <select id="bulk-status" style="width:auto; font-size:11px; padding:3px 6px;">
+      <option value="">Status...</option>
+      <option value="unculled">unculled</option>
+      <option value="rejected">rejected</option>
+      <option value="selected">selected</option>
+      <option value="developed">developed</option>
+      <option value="printed">printed</option>
+      <option value="exhibited">exhibited</option>
+    </select>
+    <div style="flex:1"></div>
+    <button class="bulk-btn danger" id="bulk-delete">Delete</button>
+    <button class="bulk-btn" id="bulk-clear">Clear selection</button>
+  </div>
+
   <!-- Keyboard hints -->
   <div id="kb-hints">
     <div class="kb"><span class="key">←→</span> Navigate</div>
@@ -525,6 +693,7 @@
     <div class="kb"><span class="key">X</span> Reject</div>
     <div class="kb"><span class="key">U</span> Unmark</div>
     <div class="kb"><span class="key">S</span> Selkie</div>
+    <div class="kb"><span class="key">Del</span> Delete</div>
     <div class="kb"><span class="key">Space</span> Grid/Review</div>
     <div class="kb"><span class="key">F</span> Filters</div>
     <div class="kb"><span class="key">/</span> Search</div>
@@ -564,6 +733,7 @@ const state = {
   },
   filterMeta: null,  // data from /api/filters
   searchQuery: null, // active semantic search query (null = normal mode)
+  selected:   new Set(), // multi-selected image ids (grid mode)
 };
 
 /* ── Helpers ──────────────────────────────────────────────────────────────── */
@@ -748,6 +918,54 @@ function buildFilterPanel() {
   // Sync date inputs to state
   state.filters.date_from = fm.date_min ? fm.date_min.substring(0,10) : null;
   state.filters.date_to   = fm.date_max ? fm.date_max.substring(0,10) : null;
+
+  // Build edit status buttons in review panel
+  const statusBox = el('wf-status');
+  statusBox.innerHTML = '';
+  (fm.edit_status_values || []).forEach(v => {
+    const btn = document.createElement('button');
+    btn.className = 'status-btn';
+    btn.textContent = v;
+    btn.dataset.v = v;
+    btn.addEventListener('click', () => setEditStatus(v));
+    statusBox.appendChild(btn);
+  });
+
+  // Populate triptych leg select
+  const tlegSel = el('sel-tleg');
+  tlegSel.innerHTML = '<option value="">—</option>';
+  (fm.triptych_values || []).forEach(v => {
+    const opt = document.createElement('option');
+    opt.value = v; opt.textContent = v;
+    tlegSel.appendChild(opt);
+  });
+
+  // Populate narrative arc select
+  const arcSel = el('sel-arc');
+  arcSel.innerHTML = '<option value="">—</option>';
+  (fm.narrative_values || []).forEach(v => {
+    const opt = document.createElement('option');
+    opt.value = v; opt.textContent = v;
+    arcSel.appendChild(opt);
+  });
+
+  // Populate project datalist
+  const dlProjects = el('dl-projects');
+  dlProjects.innerHTML = '';
+  (fm.projects || []).forEach(v => {
+    const opt = document.createElement('option');
+    opt.value = v;
+    dlProjects.appendChild(opt);
+  });
+
+  // Populate subject datalist
+  const dlSubjects = el('dl-subjects');
+  dlSubjects.innerHTML = '';
+  (fm.subjects || []).forEach(v => {
+    const opt = document.createElement('option');
+    opt.value = v;
+    dlSubjects.appendChild(opt);
+  });
 }
 
 function buildChips(containerId, values, filterKey, pickStyle=false) {
@@ -841,7 +1059,20 @@ function appendGrid(images) {
       cell.appendChild(flag);
     }
 
-    cell.addEventListener('click', () => {
+    cell.addEventListener('click', (e) => {
+      if (state.view === 'grid' && (e.metaKey || e.ctrlKey || e.shiftKey)) {
+        // Multi-select in grid mode
+        const id = img.id;
+        if (state.selected.has(id)) {
+          state.selected.delete(id);
+          cell.classList.remove('selected');
+        } else {
+          state.selected.add(id);
+          cell.classList.add('selected');
+        }
+        updateBulkBar();
+        return;
+      }
       state.idx = absIdx;
       setView('review');
       renderReview();
@@ -894,6 +1125,16 @@ function renderReview() {
   renderStars(img.rating || 0);
   renderPicks(img.pick || 'unmarked');
   renderSelkie(img.is_selkie);
+  renderEditStatus(img.edit_status || 'unculled');
+  renderColorLabel(img.color_label || 'none');
+
+  // Triptych selects
+  el('sel-tleg').value = img.triptych_leg || '';
+  el('sel-arc').value  = img.narrative_arc || '';
+  el('sel-loc').value  = img.location_type || '';
+
+  // Notes
+  el('wf-notes-text').value = img.notes || '';
 
   // Meta
   el('m-name').textContent    = img.file_name || '—';
@@ -915,9 +1156,11 @@ function renderReview() {
   el('m-jpeg').textContent    = img.has_jpeg ? '✓' : '—';
   el('m-on1').textContent     = img.has_on1 ? '✓' : '—';
   el('m-radiant').textContent = img.has_radiant ? '✓' : '—';
-  el('m-tleg').textContent    = img.triptych_leg || '—';
-  el('m-arc').textContent     = img.narrative_arc || '—';
-  el('m-loc').textContent     = img.location_type || '—';
+
+  // Projects chips
+  renderTagChips('tag-projects', img.projects || [], 'projects');
+  // Subjects chips
+  renderTagChips('tag-subjects', img.subjects || [], 'subjects');
 
   // AI
   el('m-ai-desc').textContent = img.ai_description || '—';
@@ -928,6 +1171,8 @@ function renderReview() {
       const chip = document.createElement('span');
       chip.className = 'ai-kw';
       chip.textContent = kw;
+      // Click AI keyword to add as filterable keyword tag
+      chip.addEventListener('click', () => addTag('keywords', kw));
       kwBox.appendChild(chip);
     });
   }
@@ -936,8 +1181,14 @@ function renderReview() {
 function clearMeta() {
   ['m-name','m-date','m-volume','m-size','m-camera','m-lens','m-mount',
    'm-aperture','m-shutter','m-iso','m-focal','m-ev','m-dims','m-tod',
-   'm-season','m-xmp','m-jpeg','m-on1','m-radiant','m-tleg','m-arc','m-loc'
+   'm-season','m-xmp','m-jpeg','m-on1','m-radiant'
   ].forEach(id => el(id).textContent = '—');
+  el('sel-tleg').value = '';
+  el('sel-arc').value = '';
+  el('sel-loc').value = '';
+  el('wf-notes-text').value = '';
+  el('tag-projects').innerHTML = '';
+  el('tag-subjects').innerHTML = '';
   el('m-ai-desc').textContent = '—';
   el('m-ai-keywords').innerHTML = '';
 }
@@ -960,6 +1211,30 @@ function renderPicks(pick) {
 
 function renderSelkie(val) {
   el('wf-selkie').classList.toggle('active', !!val);
+}
+
+function renderEditStatus(status) {
+  el('wf-status').querySelectorAll('.status-btn').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.v === status);
+  });
+}
+
+function renderColorLabel(label) {
+  el('wf-colors').querySelectorAll('.color-dot').forEach(dot => {
+    dot.classList.toggle('active', dot.dataset.c === label);
+  });
+}
+
+function renderTagChips(containerId, values, type) {
+  const box = el(containerId);
+  box.innerHTML = '';
+  values.forEach(v => {
+    const chip = document.createElement('span');
+    chip.className = 'tag-chip';
+    chip.innerHTML = `${v}<span class="remove-tag" title="Remove">&times;</span>`;
+    chip.querySelector('.remove-tag').addEventListener('click', () => removeTag(type, v));
+    box.appendChild(chip);
+  });
 }
 
 /* ── Workflow actions ─────────────────────────────────────────────────────── */
@@ -1015,6 +1290,161 @@ async function openJpeg() {
   }
 }
 
+/* ── Edit status, color label, triptych, notes ────────────────────────────── */
+async function setEditStatus(val) {
+  const img = state.images[state.idx];
+  if (!img) return;
+  const newVal = img.edit_status === val ? 'unculled' : val;
+  const updated = await patchImage(img.id, { edit_status: newVal });
+  if (updated) { renderReview(); toast(`Status: ${newVal}`); }
+}
+
+async function setColorLabel(val) {
+  const img = state.images[state.idx];
+  if (!img) return;
+  const newVal = img.color_label === val ? 'none' : val;
+  const updated = await patchImage(img.id, { color_label: newVal });
+  if (updated) { renderReview(); toast(`Label: ${newVal}`); }
+}
+
+async function setTriptychField(field, val) {
+  const img = state.images[state.idx];
+  if (!img) return;
+  const data = {};
+  data[field] = val || null;
+  const updated = await patchImage(img.id, data);
+  if (updated) { renderReview(); toast(`${field}: ${val || 'cleared'}`); }
+}
+
+async function saveNotes() {
+  const img = state.images[state.idx];
+  if (!img) return;
+  const val = el('wf-notes-text').value;
+  if (val === (img.notes || '')) return; // No change
+  const updated = await patchImage(img.id, { notes: val });
+  if (updated) { toast('Notes saved'); }
+}
+
+/* ── Many-to-many: projects, subjects, keywords ──────────────────────────── */
+async function addTag(type, value) {
+  const img = state.images[state.idx];
+  if (!img) return;
+  const key = type === 'keywords' ? 'keyword' : 'name';
+  try {
+    const r = await fetch(`${API}/api/images/${img.id}/${type}`, {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ [key]: value }),
+    });
+    if (!r.ok) { const e = await r.json(); throw new Error(e.error); }
+    const updated = await r.json();
+    const i = state.images.findIndex(im => im.id === img.id);
+    if (i >= 0) state.images[i] = updated;
+    renderReview();
+  } catch(e) {
+    toast('Error: ' + e.message);
+  }
+}
+
+async function removeTag(type, value) {
+  const img = state.images[state.idx];
+  if (!img) return;
+  try {
+    const r = await fetch(`${API}/api/images/${img.id}/${type}/${encodeURIComponent(value)}`, {
+      method: 'DELETE',
+    });
+    if (!r.ok) { const e = await r.json(); throw new Error(e.error); }
+    const updated = await r.json();
+    const i = state.images.findIndex(im => im.id === img.id);
+    if (i >= 0) state.images[i] = updated;
+    renderReview();
+  } catch(e) {
+    toast('Error: ' + e.message);
+  }
+}
+
+/* ── Delete ────────────────────────────────────────────────────────────────── */
+async function deleteCurrentImage() {
+  const img = state.images[state.idx];
+  if (!img) return;
+  if (!confirm(`Delete "${img.file_name}" from database?\n\nThis removes the DB record and thumbnail.\nThe original file on disk is NOT deleted.`)) return;
+  try {
+    const r = await fetch(`${API}/api/images/${img.id}`, { method: 'DELETE' });
+    if (!r.ok) { const e = await r.json(); throw new Error(e.error); }
+    state.images.splice(state.idx, 1);
+    state.total--;
+    if (state.idx >= state.images.length) state.idx = Math.max(0, state.images.length - 1);
+    el('tb-count').textContent = `${state.images.length.toLocaleString()} / ${state.total.toLocaleString()}`;
+    renderGrid(true);
+    renderReview();
+    toast('Deleted');
+  } catch(e) {
+    toast('Delete failed: ' + e.message);
+  }
+}
+
+/* ── Bulk operations ──────────────────────────────────────────────────────── */
+function updateBulkBar() {
+  const n = state.selected.size;
+  el('bulk-bar').classList.toggle('active', n > 0);
+  el('bulk-count').textContent = `${n} selected`;
+}
+
+function clearSelection() {
+  state.selected.clear();
+  el('grid-view').querySelectorAll('.thumb-cell.selected').forEach(c => c.classList.remove('selected'));
+  updateBulkBar();
+}
+
+async function bulkPatch(patch) {
+  if (state.selected.size === 0) return;
+  const ids = [...state.selected];
+  try {
+    const r = await fetch(`${API}/api/images/bulk`, {
+      method: 'PATCH',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ ids, patch }),
+    });
+    if (!r.ok) { const e = await r.json(); throw new Error(e.error); }
+    // Update local state
+    for (const id of ids) {
+      const i = state.images.findIndex(img => img.id === id);
+      if (i >= 0) Object.assign(state.images[i], patch);
+    }
+    renderGrid(true);
+    renderReview();
+    toast(`Updated ${ids.length} images`);
+  } catch(e) {
+    toast('Bulk update failed: ' + e.message);
+  }
+}
+
+async function bulkDelete() {
+  const n = state.selected.size;
+  if (n === 0) return;
+  if (!confirm(`Delete ${n} images from database?\n\nDB records and thumbnails will be removed.\nOriginal files on disk are NOT deleted.`)) return;
+  const ids = [...state.selected];
+  try {
+    const r = await fetch(`${API}/api/images/bulk`, {
+      method: 'DELETE',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ ids }),
+    });
+    if (!r.ok) { const e = await r.json(); throw new Error(e.error); }
+    state.images = state.images.filter(img => !state.selected.has(img.id));
+    state.total -= n;
+    state.selected.clear();
+    if (state.idx >= state.images.length) state.idx = Math.max(0, state.images.length - 1);
+    el('tb-count').textContent = `${state.images.length.toLocaleString()} / ${state.total.toLocaleString()}`;
+    renderGrid(true);
+    renderReview();
+    updateBulkBar();
+    toast(`Deleted ${n} images`);
+  } catch(e) {
+    toast('Bulk delete failed: ' + e.message);
+  }
+}
+
 function updateGridCell(imgId) {
   const img = state.images.find(i => i.id === imgId);
   if (!img) return;
@@ -1067,6 +1497,8 @@ function setView(v) {
 function reload() {
   state.cursor = null;
   state.images = [];
+  state.selected.clear();
+  updateBulkBar();
   loadImages(true);
 }
 
@@ -1074,6 +1506,7 @@ function reload() {
 document.addEventListener('keydown', e => {
   // Don't capture when typing in inputs
   if (['INPUT','SELECT','TEXTAREA'].includes(e.target.tagName)) return;
+  if (e.target.isContentEditable) return;
 
   switch(e.key) {
     case 'ArrowLeft':  e.preventDefault(); navigate(-1); break;
@@ -1088,6 +1521,11 @@ document.addEventListener('keydown', e => {
     case 'x': case 'X': setPick('reject'); break;
     case 'u': case 'U': setPick('unmarked'); break;
     case 's': case 'S': toggleSelkie(); break;
+    case 'Delete': case 'Backspace':
+      if (e.metaKey || e.ctrlKey) break; // Don't intercept browser shortcuts
+      e.preventDefault();
+      deleteCurrentImage();
+      break;
     case ' ':
       e.preventDefault();
       setView(state.view === 'review' ? 'grid' : 'review');
@@ -1147,6 +1585,59 @@ el('btn-open-ext').addEventListener('click', () => {
   }
 });
 el('btn-open-jpeg').addEventListener('click', openJpeg);
+
+// Delete
+el('btn-delete').addEventListener('click', deleteCurrentImage);
+
+// Color labels
+el('wf-colors').querySelectorAll('.color-dot').forEach(dot => {
+  dot.addEventListener('click', () => setColorLabel(dot.dataset.c));
+});
+
+// Triptych selects
+el('sel-tleg').addEventListener('change', () => setTriptychField('triptych_leg', el('sel-tleg').value));
+el('sel-arc').addEventListener('change', () => setTriptychField('narrative_arc', el('sel-arc').value));
+el('sel-loc').addEventListener('change', () => setTriptychField('location_type', el('sel-loc').value));
+
+// Notes — save on blur
+el('wf-notes-text').addEventListener('blur', saveNotes);
+// Also save on Ctrl+Enter
+el('wf-notes-text').addEventListener('keydown', e => {
+  if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+    e.preventDefault();
+    saveNotes();
+    el('wf-notes-text').blur();
+  }
+});
+
+// Project/Subject add inputs
+el('add-project').addEventListener('keydown', e => {
+  if (e.key === 'Enter' && el('add-project').value.trim()) {
+    addTag('projects', el('add-project').value.trim());
+    el('add-project').value = '';
+  }
+});
+el('add-subject').addEventListener('keydown', e => {
+  if (e.key === 'Enter' && el('add-subject').value.trim()) {
+    addTag('subjects', el('add-subject').value.trim());
+    el('add-subject').value = '';
+  }
+});
+
+// Bulk actions
+el('bulk-pick').addEventListener('click', () => bulkPatch({ pick: 'pick' }));
+el('bulk-reject').addEventListener('click', () => bulkPatch({ pick: 'reject' }));
+el('bulk-unmark').addEventListener('click', () => bulkPatch({ pick: 'unmarked' }));
+el('bulk-rating').addEventListener('change', () => {
+  const v = el('bulk-rating').value;
+  if (v !== '') { bulkPatch({ rating: parseInt(v) }); el('bulk-rating').value = ''; }
+});
+el('bulk-status').addEventListener('change', () => {
+  const v = el('bulk-status').value;
+  if (v !== '') { bulkPatch({ edit_status: v }); el('bulk-status').value = ''; }
+});
+el('bulk-delete').addEventListener('click', bulkDelete);
+el('bulk-clear').addEventListener('click', clearSelection);
 
 // Rating range
 el('rating-min').addEventListener('input', () => {

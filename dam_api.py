@@ -4,13 +4,23 @@ DAM API — Flask JSON API + static file server
 Run: gunicorn -w 4 -b 0.0.0.0:5000 dam_api:app
 
 Endpoints:
-    GET   /                       SPA entry point
-    GET   /api/images             Paginated image feed (keyset pagination)
-    GET   /api/images/<id>        Single image detail
-    PATCH /api/images/<id>        Update workflow fields
-    GET   /api/thumbs/<filename>  Thumbnail file
-    GET   /api/stats              DB summary
-    GET   /api/filters            Available filter values for UI
+    GET    /                               SPA entry point
+    GET    /api/images                     Paginated image feed (keyset pagination)
+    GET    /api/images/<id>                Single image detail
+    PATCH  /api/images/<id>                Update workflow fields
+    DELETE /api/images/<id>                Delete image record
+    PATCH  /api/images/bulk                Bulk update multiple images
+    DELETE /api/images/bulk                Bulk delete multiple images
+    POST   /api/images/<id>/projects       Assign project
+    DELETE /api/images/<id>/projects/<n>   Remove project
+    POST   /api/images/<id>/subjects       Assign subject
+    DELETE /api/images/<id>/subjects/<n>   Remove subject
+    POST   /api/images/<id>/keywords       Add keyword
+    DELETE /api/images/<id>/keywords/<kw>  Remove keyword
+    GET    /api/search?q=...               Semantic search
+    GET    /api/thumbs/<filename>          Thumbnail file
+    GET    /api/stats                      DB summary
+    GET    /api/filters                    Available filter values for UI
 """
 
 import json
@@ -327,6 +337,260 @@ def image_patch(image_id):
     return jsonify(row_to_dict(row))
 
 
+# ── Bulk PATCH ────────────────────────────────────────────────────────────────
+
+
+@app.route("/api/images/bulk", methods=["PATCH"])
+def images_bulk_patch():
+    """Apply the same patch to multiple images at once."""
+    data = request.get_json(silent=True)
+    if not data:
+        return jsonify({"error": "No JSON body"}), 400
+    ids = data.get("ids")
+    patch = data.get("patch")
+    if not ids or not isinstance(ids, list):
+        return jsonify({"error": "ids must be a non-empty list"}), 400
+    if not patch or not isinstance(patch, dict):
+        return jsonify({"error": "patch must be a non-empty object"}), 400
+
+    clean, err = validate_patch(patch)
+    if err:
+        return jsonify({"error": err}), 400
+    if not clean:
+        return jsonify({"error": "Nothing to update"}), 400
+
+    # Safety: column names come from PATCHABLE (hardcoded string literals).
+    set_clause = ", ".join(f"{k} = ?" for k in clean)
+    values = list(clean.values())
+
+    db = get_db()
+    try:
+        for img_id in ids:
+            db.execute(
+                f"UPDATE images SET {set_clause}, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                [*values, int(img_id)],
+            )
+        db.commit()
+    finally:
+        db.close()
+
+    return jsonify({"updated": len(ids)})
+
+
+# ── Delete ────────────────────────────────────────────────────────────────────
+
+
+@app.route("/api/images/<int:image_id>", methods=["DELETE"])
+def image_delete(image_id):
+    """Delete an image record from the DB. Does NOT delete files on disk."""
+    db = get_db()
+    try:
+        row = db.execute("SELECT id FROM images WHERE id = ?", (image_id,)).fetchone()
+        if not row:
+            abort(404)
+        # CASCADE deletes handle join tables; clean up embeddings and thumbnails too
+        db.execute("DELETE FROM image_embeddings WHERE image_id = ?", (image_id,))
+        db.execute("DELETE FROM thumbnails WHERE image_id = ?", (image_id,))
+        db.execute("DELETE FROM images WHERE id = ?", (image_id,))
+        db.commit()
+    finally:
+        db.close()
+
+    # Remove cached thumbnail file if it exists
+    thumb_file = THUMB_DIR / f"{image_id}.jpg"
+    if thumb_file.exists():
+        thumb_file.unlink()
+
+    return jsonify({"deleted": image_id})
+
+
+@app.route("/api/images/bulk", methods=["DELETE"])
+def images_bulk_delete():
+    """Delete multiple image records from the DB."""
+    data = request.get_json(silent=True)
+    if not data:
+        return jsonify({"error": "No JSON body"}), 400
+    ids = data.get("ids")
+    if not ids or not isinstance(ids, list):
+        return jsonify({"error": "ids must be a non-empty list"}), 400
+
+    db = get_db()
+    try:
+        for img_id in ids:
+            db.execute("DELETE FROM image_embeddings WHERE image_id = ?", (int(img_id),))
+            db.execute("DELETE FROM thumbnails WHERE image_id = ?", (int(img_id),))
+            db.execute("DELETE FROM images WHERE id = ?", (int(img_id),))
+        db.commit()
+    finally:
+        db.close()
+
+    # Remove cached thumbnails
+
+    for img_id in ids:
+        thumb_file = THUMB_DIR / f"{img_id}.jpg"
+        if thumb_file.exists():
+            thumb_file.unlink()
+
+    return jsonify({"deleted": len(ids)})
+
+
+# ── Many-to-many: Projects ───────────────────────────────────────────────────
+
+
+def _fetch_image_flat(db, image_id):
+    """Return a single image row from images_flat, or None."""
+    row = db.execute("SELECT * FROM images_flat WHERE id = ?", (image_id,)).fetchone()
+    return row_to_dict(row) if row else None
+
+
+@app.route("/api/images/<int:image_id>/projects", methods=["POST"])
+def image_add_project(image_id):
+    data = request.get_json(silent=True)
+    if not data or "name" not in data:
+        return jsonify({"error": "name is required"}), 400
+    name = data["name"].strip()
+    if not name:
+        return jsonify({"error": "name cannot be empty"}), 400
+
+    db = get_db()
+    try:
+        # Ensure project exists
+        db.execute("INSERT OR IGNORE INTO projects (name) VALUES (?)", (name,))
+        proj = db.execute("SELECT id FROM projects WHERE name = ?", (name,)).fetchone()
+        db.execute(
+            "INSERT OR IGNORE INTO image_projects (image_id, project_id) VALUES (?, ?)",
+            (image_id, proj["id"]),
+        )
+        db.commit()
+        result = _fetch_image_flat(db, image_id)
+    finally:
+        db.close()
+
+    if not result:
+        abort(404)
+    return jsonify(result)
+
+
+@app.route("/api/images/<int:image_id>/projects/<name>", methods=["DELETE"])
+def image_remove_project(image_id, name):
+    db = get_db()
+    try:
+        proj = db.execute("SELECT id FROM projects WHERE name = ?", (name,)).fetchone()
+        if proj:
+            db.execute(
+                "DELETE FROM image_projects WHERE image_id = ? AND project_id = ?",
+                (image_id, proj["id"]),
+            )
+            db.commit()
+        result = _fetch_image_flat(db, image_id)
+    finally:
+        db.close()
+
+    if not result:
+        abort(404)
+    return jsonify(result)
+
+
+# ── Many-to-many: Subjects ───────────────────────────────────────────────────
+
+
+@app.route("/api/images/<int:image_id>/subjects", methods=["POST"])
+def image_add_subject(image_id):
+    data = request.get_json(silent=True)
+    if not data or "name" not in data:
+        return jsonify({"error": "name is required"}), 400
+    name = data["name"].strip()
+    if not name:
+        return jsonify({"error": "name cannot be empty"}), 400
+
+    db = get_db()
+    try:
+        db.execute("INSERT OR IGNORE INTO subjects (name) VALUES (?)", (name,))
+        subj = db.execute("SELECT id FROM subjects WHERE name = ?", (name,)).fetchone()
+        db.execute(
+            "INSERT OR IGNORE INTO image_subjects (image_id, subject_id) VALUES (?, ?)",
+            (image_id, subj["id"]),
+        )
+        db.commit()
+        result = _fetch_image_flat(db, image_id)
+    finally:
+        db.close()
+
+    if not result:
+        abort(404)
+    return jsonify(result)
+
+
+@app.route("/api/images/<int:image_id>/subjects/<name>", methods=["DELETE"])
+def image_remove_subject(image_id, name):
+    db = get_db()
+    try:
+        subj = db.execute("SELECT id FROM subjects WHERE name = ?", (name,)).fetchone()
+        if subj:
+            db.execute(
+                "DELETE FROM image_subjects WHERE image_id = ? AND subject_id = ?",
+                (image_id, subj["id"]),
+            )
+            db.commit()
+        result = _fetch_image_flat(db, image_id)
+    finally:
+        db.close()
+
+    if not result:
+        abort(404)
+    return jsonify(result)
+
+
+# ── Many-to-many: Keywords ───────────────────────────────────────────────────
+
+
+@app.route("/api/images/<int:image_id>/keywords", methods=["POST"])
+def image_add_keyword(image_id):
+    data = request.get_json(silent=True)
+    if not data or "keyword" not in data:
+        return jsonify({"error": "keyword is required"}), 400
+    kw = data["keyword"].strip().lower()
+    if not kw:
+        return jsonify({"error": "keyword cannot be empty"}), 400
+
+    db = get_db()
+    try:
+        db.execute("INSERT OR IGNORE INTO keywords (keyword) VALUES (?)", (kw,))
+        row = db.execute("SELECT id FROM keywords WHERE keyword = ?", (kw,)).fetchone()
+        db.execute(
+            "INSERT OR IGNORE INTO image_keywords (image_id, keyword_id) VALUES (?, ?)",
+            (image_id, row["id"]),
+        )
+        db.commit()
+        result = _fetch_image_flat(db, image_id)
+    finally:
+        db.close()
+
+    if not result:
+        abort(404)
+    return jsonify(result)
+
+
+@app.route("/api/images/<int:image_id>/keywords/<keyword>", methods=["DELETE"])
+def image_remove_keyword(image_id, keyword):
+    db = get_db()
+    try:
+        row = db.execute("SELECT id FROM keywords WHERE keyword = ?", (keyword,)).fetchone()
+        if row:
+            db.execute(
+                "DELETE FROM image_keywords WHERE image_id = ? AND keyword_id = ?",
+                (image_id, row["id"]),
+            )
+            db.commit()
+        result = _fetch_image_flat(db, image_id)
+    finally:
+        db.close()
+
+    if not result:
+        abort(404)
+    return jsonify(result)
+
+
 @app.route("/api/images/<int:image_id>/open_external", methods=["POST"])
 def image_open_external(image_id):
     db = get_db()
@@ -432,6 +696,12 @@ def filters():
         date_range = db.execute(
             "SELECT MIN(date_taken), MAX(date_taken) FROM images WHERE date_taken IS NOT NULL"
         ).fetchone()
+        projects = [r[0] for r in db.execute("SELECT name FROM projects ORDER BY name")]
+        subjects = [r[0] for r in db.execute("SELECT DISTINCT name FROM subjects ORDER BY name")]
+        location_types = [
+            r[0]
+            for r in db.execute("SELECT DISTINCT location_type FROM images WHERE location_type IS NOT NULL ORDER BY 1")
+        ]
     finally:
         db.close()
 
@@ -443,6 +713,11 @@ def filters():
             "pick_values": sorted(PICK_VALUES),
             "edit_status_values": sorted(EDIT_STATUS_VALUES),
             "color_values": sorted(COLOR_VALUES),
+            "triptych_values": sorted(v for v in TRIPTYCH_VALUES if v),
+            "narrative_values": sorted(v for v in NARRATIVE_VALUES if v),
+            "location_types": location_types,
+            "projects": projects,
+            "subjects": subjects,
             "date_min": date_range[0],
             "date_max": date_range[1],
         }
