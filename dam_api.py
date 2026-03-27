@@ -30,6 +30,7 @@ import subprocess
 import typing
 import urllib.error
 import urllib.request
+from pathlib import Path
 
 from flask import Flask, abort, jsonify, request, send_from_directory
 
@@ -44,6 +45,16 @@ from dam_config import (
 from dam_db import get_db
 
 app = Flask(__name__, static_folder=None)
+
+
+def _find_jpeg_sidecar(raw_path):
+    """Derive JPEG sidecar path from RAW path, or None if not found."""
+    p = Path(raw_path)
+    for ext in (".JPG", ".jpg", ".JPEG", ".jpeg"):
+        candidate = p.with_suffix(ext)
+        if candidate.exists():
+            return candidate
+    return None
 
 
 def row_to_dict(row) -> dict[str, typing.Any]:
@@ -644,14 +655,20 @@ def image_open_external(image_id):
 def image_open_jpeg(image_id):
     db = get_db()
     try:
-        row = db.execute("SELECT file_path, jpeg_path FROM images_flat WHERE id = ?", (image_id,)).fetchone()
+        row = db.execute("SELECT file_path, has_jpeg FROM images WHERE id = ?", (image_id,)).fetchone()
     finally:
         db.close()
 
     if not row:
         abort(404)
 
-    target_path = row["jpeg_path"] or row["file_path"]
+    # If the primary file has a JPEG sidecar, find and open it
+    target_path = row["file_path"]
+    if row["has_jpeg"]:
+        jpeg = _find_jpeg_sidecar(row["file_path"])
+        if jpeg:
+            target_path = str(jpeg)
+
     if not target_path or not os.path.exists(target_path):
         return jsonify({"error": "File not found on disk"}), 404
 

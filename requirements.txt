@@ -8,5 +8,11 @@ sqlite-vec>=0.1.0
 # Desktop window wrapper
 pywebview>=5.0.0
 
+# Progress bars
+tqdm>=4.60
+
+# Image processing (thumbnail resize fallback on non-macOS)
+Pillow>=10.0
+
 # Testing
 pytest>=7.0

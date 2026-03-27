@@ -21,6 +21,8 @@ Safety:
 
 import json
 import os
+import platform
+import shutil
 import subprocess
 import sys
 import time
@@ -481,6 +483,21 @@ ON CONFLICT(file_path) DO UPDATE SET
 # ============================================================
 
 
+def _resize_thumbnail(thumb_path, max_dim=300):
+    """Resize thumbnail to max_dim on longest side. Uses sips on macOS, Pillow elsewhere."""
+    if platform.system() == "Darwin":
+        subprocess.run(["sips", "-Z", str(max_dim), str(thumb_path)], capture_output=True, timeout=10)
+    else:
+        try:
+            from PIL import Image
+
+            img = Image.open(thumb_path)
+            img.thumbnail((max_dim, max_dim))
+            img.save(thumb_path)
+        except ImportError:
+            pass  # no resize available — thumbnail will be full size
+
+
 def extract_thumbnail_file_only(file_path, image_id):
     """Extract and resize thumbnail to disk only. No DB writes — safe to run in threads.
     Returns (image_id, thumb_path_str) on success, (image_id, None) on failure.
@@ -504,14 +521,12 @@ def extract_thumbnail_file_only(file_path, image_id):
                 result = subprocess.run(["exiftool", "-b", tag, str(fpath)], capture_output=True, timeout=10)
                 if result.stdout and len(result.stdout) > 1000:
                     thumb_path.write_bytes(result.stdout)
-                    subprocess.run(["sips", "-Z", "300", str(thumb_path)], capture_output=True, timeout=10)
+                    _resize_thumbnail(thumb_path)
                     return image_id, str(thumb_path)
         elif ext in (".jpg", ".jpeg"):
-            # JPEG: copy and resize directly with sips
-            import shutil
-
+            # JPEG: copy and resize directly
             shutil.copy2(str(fpath), str(thumb_path))
-            subprocess.run(["sips", "-Z", "300", str(thumb_path)], capture_output=True, timeout=10)
+            _resize_thumbnail(thumb_path)
             return image_id, str(thumb_path)
     except (subprocess.TimeoutExpired, Exception):
         pass

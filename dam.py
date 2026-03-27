@@ -21,7 +21,12 @@ import sys
 from pathlib import Path
 
 # Guard: ensure we're running under a Python that has sqlite_vec (skip when frozen — bundle has deps)
-if not getattr(sys, "frozen", False) and "homebrew" not in sys.executable and "/opt/" not in sys.executable:
+if (
+    sys.platform == "darwin"
+    and not getattr(sys, "frozen", False)
+    and "homebrew" not in sys.executable
+    and "/opt/" not in sys.executable
+):
     print(f"ERROR: Running under {sys.executable}")
     print("DAM requires homebrew python: /opt/homebrew/bin/python3 dam.py")
     sys.exit(1)

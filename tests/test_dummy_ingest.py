@@ -11,10 +11,11 @@ def update(status, cur, tot):
         json.dump({"status": status, "current": cur, "total": tot, "timestamp": datetime.now().isoformat()}, f)
 
 
-update("scanning", 0, 0)
-time.sleep(2)
-for i in range(1, 11):
-    update("copying", i, 10)
-    time.sleep(1)
-update("idle", 0, 0)
-print("done")
+if __name__ == "__main__":
+    update("scanning", 0, 0)
+    time.sleep(2)
+    for i in range(1, 11):
+        update("copying", i, 10)
+        time.sleep(1)
+    update("idle", 0, 0)
+    print("done")

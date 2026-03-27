@@ -1,6 +1,6 @@
 #!/opt/homebrew/bin/python3
 """
-DAM Card Watcher — auto-detect SD card mount and trigger full ingest pipeline.
+DAM Card Watcher — auto-detect SD/CFexpress card mount and trigger full ingest pipeline.
 
 Runs as a LaunchAgent. When a new volume with a DCIM folder appears,
 fires: dam ingest → scan → thumbnails → AI tag (background).
@@ -38,17 +38,24 @@ seen_cards = set()  # cards we've already processed this session
 
 
 def get_mounted_cards():
-    """Return set of volume paths that have a DCIM folder."""
+    """Return set of volume paths that have a DCIM folder.
+
+    Logs each volume's status for diagnostics (helps debug CFexpress detection).
+    """
     cards = set()
     volumes = Path("/Volumes")
     if not volumes.exists():
         return cards
     for vol in volumes.iterdir():
         if vol.name in IGNORE_VOLUMES:
+            log.debug(f"  Volume {vol.name}: skipped (in IGNORE_VOLUMES)")
             continue
         dcim = vol / "DCIM"
         if dcim.exists() and dcim.is_dir():
             cards.add(str(vol))
+            log.debug(f"  Volume {vol.name}: DCIM found — card detected")
+        else:
+            log.debug(f"  Volume {vol.name}: no DCIM folder")
     return cards
 
 
@@ -66,7 +73,10 @@ def notify(title, message):
 
 
 def run_ingest(card_path):
-    """Run full DAM ingest pipeline for a detected card."""
+    """Run full DAM ingest pipeline for a detected card.
+
+    Returns True on success, False on failure (enables retry on next poll).
+    """
     vol_name = Path(card_path).name
     log.info(f"═══ CARD DETECTED: {vol_name} ═══")
     notify("DAM", f"Card detected: {vol_name} — starting ingest")
@@ -100,12 +110,16 @@ def run_ingest(card_path):
             for line in result.stdout.strip().split("\n")[-20:]:
                 log.info(f"  {line}")
 
+        return result.returncode == 0
+
     except subprocess.TimeoutExpired:
         log.error("Ingest TIMED OUT after 2 hours")
         notify("DAM", f"Ingest timed out: {vol_name}")
+        return False
     except Exception as e:
         log.error(f"Ingest error: {e}")
         notify("DAM", f"Ingest error: {vol_name}")
+        return False
 
 
 def main():
@@ -126,12 +140,15 @@ def main():
             new_cards = current - seen_cards
 
             for card_path in new_cards:
-                # Small delay — let the OS finish mounting
-                time.sleep(2)
+                # Settle time — let OS finish mounting (CFexpress readers may be slower)
+                time.sleep(3)
                 # Verify DCIM still there (card might have been pulled)
                 if (Path(card_path) / "DCIM").exists():
-                    run_ingest(card_path)
-                    seen_cards.add(card_path)
+                    success = run_ingest(card_path)
+                    if success:
+                        seen_cards.add(card_path)
+                    else:
+                        log.info(f"Will retry {Path(card_path).name} on next poll")
 
             # Clean up ejected cards from seen set
             gone = seen_cards - current

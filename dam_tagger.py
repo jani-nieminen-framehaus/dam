@@ -5,7 +5,7 @@ DAM Tagger — AI keywording + semantic search embeddings
 Pipeline per image:
   1. Load thumbnail (never touches RAW)
   2. LLaVA 34b → documentary description
-  3. Llama 3.1 8b → structured keyword extraction
+  3. Llama 3.1 70b → structured keyword extraction
   4. nomic-embed-text → 768-dim embedding for semantic search
   5. Write description + keywords + embedding back to DB
 
