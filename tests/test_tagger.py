@@ -1,11 +1,12 @@
-"""Tests for dam_tagger module — burst detection and keyword parsing."""
+"""Tests for dam_tagger module — burst detection, keyword parsing, and selection."""
 
+import json
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from dam_tagger import detect_bursts, text_extract_keywords
+from dam_tagger import detect_bursts, select_candidate_rows, text_extract_keywords
 
 # ── detect_bursts ─────────────────────────────────────────────────────────────
 
@@ -150,3 +151,29 @@ def test_keyword_parsing_malformed(monkeypatch):
     assert result["factual"] == []
     assert result["mood"] == []
     assert result["triptych_relevant"] is False
+
+
+def test_select_candidate_rows_respects_manifest(db_conn, tmp_path):
+    db_conn.execute(
+        """INSERT INTO images
+           (id, file_path, file_name, file_type, volume, relative_path, date_taken, camera_short)
+           VALUES
+           (1, '/Volumes/Photos2/2026-03-28/A.ARW', 'A.ARW', 'ARW', 'Archive 2', '2026-03-28/A.ARW', '2026-03-28T10:00:00', 'A1'),
+           (2, '/Volumes/Photos2/2026-03-28/B.ARW', 'B.ARW', 'ARW', 'Archive 2', '2026-03-28/B.ARW', '2026-03-28T10:00:01', 'A1'),
+           (3, '/Volumes/Photos2/2026-03-27/C.ARW', 'C.ARW', 'ARW', 'Archive 2', '2026-03-27/C.ARW', '2026-03-27T10:00:00', 'A1')"""
+    )
+    db_conn.execute("INSERT INTO thumbnails (image_id, thumb_path) VALUES (1, '1.jpg'), (2, '2.jpg'), (3, '3.jpg')")
+    manifest = tmp_path / "last_ingest.json"
+    manifest.write_text(
+        json.dumps(
+            {
+                "volume": "Archive 2",
+                "relative_paths": ["2026-03-28/A.ARW", "2026-03-28/B.ARW"],
+            }
+        )
+    )
+    db_conn.commit()
+
+    rows = select_candidate_rows(db_conn, manifest_path=manifest)
+
+    assert [row["id"] for row in rows] == [2, 1]

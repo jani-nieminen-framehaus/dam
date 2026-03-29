@@ -295,6 +295,64 @@ def write_keywords(conn, image_id, keywords_dict):
             )
 
 
+def load_ingest_manifest(path):
+    """Load an ingest manifest for scoping tag runs to one batch."""
+    with open(path, "r") as f:
+        data = json.load(f)
+
+    volume = data.get("volume")
+    relative_paths = [p for p in data.get("relative_paths", []) if p]
+    if not volume or not relative_paths:
+        raise ValueError(f"Invalid ingest manifest: {path}")
+    return volume, sorted(set(relative_paths))
+
+
+def select_candidate_rows(conn, since=None, camera=None, retag=False, manifest_path=None, sample=None, limit=None):
+    """Return candidate image rows for tagging."""
+    clauses = []
+    params = []
+
+    if manifest_path:
+        volume, relative_paths = load_ingest_manifest(manifest_path)
+        conn.execute("DROP TABLE IF EXISTS temp_ingest_scope")
+        conn.execute("CREATE TEMP TABLE temp_ingest_scope (relative_path TEXT PRIMARY KEY)")
+        conn.executemany(
+            "INSERT OR IGNORE INTO temp_ingest_scope (relative_path) VALUES (?)",
+            [(path,) for path in relative_paths],
+        )
+        clauses.append("i.volume = ?")
+        params.append(volume)
+        clauses.append("EXISTS (SELECT 1 FROM temp_ingest_scope s WHERE s.relative_path = i.relative_path)")
+
+    if not retag:
+        clauses.append("i.ai_description IS NULL")
+    if since:
+        clauses.append("i.date_taken >= ?")
+        params.append(since)
+    if camera:
+        clauses.append("i.camera_short = ?")
+        params.append(camera)
+
+    clauses.append("EXISTS (SELECT 1 FROM thumbnails t WHERE t.image_id = i.id)")
+
+    for pattern in SKIP_PATH_PATTERNS:
+        clauses.append("i.file_path NOT LIKE ?")
+        params.append(f"%{pattern}%")
+
+    where = "WHERE " + " AND ".join(clauses) if clauses else ""
+    order = "ORDER BY RANDOM()" if sample else "ORDER BY i.date_taken DESC"
+    lim_clause = f"LIMIT {sample or limit or 999999}"
+    sql = f"""
+        SELECT i.id, i.file_name, i.date_taken, i.camera_short,
+               i.file_path, i.triptych_leg
+        FROM images i
+        {where}
+        {order}
+        {lim_clause}
+    """
+    return conn.execute(sql, params).fetchall()
+
+
 # ── Main tagging loop ───────────────────────────────────────────────────────────
 
 
@@ -303,6 +361,7 @@ def tag_images(args):
     limit = None
     since = None
     camera = None
+    manifest_path = None
     retag = False
     verbose = False
     skip_bursts = True  # Default: ON — skip burst duplicates
@@ -322,6 +381,9 @@ def tag_images(args):
             i += 2
         elif a == "--camera":
             camera = args[i + 1]
+            i += 2
+        elif a == "--manifest":
+            manifest_path = args[i + 1]
             i += 2
         elif a == "--retag":
             retag = True
@@ -367,43 +429,15 @@ def tag_images(args):
     print("  ✓ All models loaded\n")
 
     conn = get_db()
-
-    # Build query for untagged images with thumbnails
-    clauses = []
-    params = []
-
-    if not retag:
-        clauses.append("i.ai_description IS NULL")
-    if since:
-        clauses.append("i.date_taken >= ?")
-        params.append(since)
-    if camera:
-        clauses.append("i.camera_short = ?")
-        params.append(camera)
-
-    # Must have a thumbnail to tag
-    clauses.append("EXISTS (SELECT 1 FROM thumbnails t WHERE t.image_id = i.id)")
-
-    # Exclude derivative/junk paths (developed exports, proxies, salvage, etc.)
-    for pattern in SKIP_PATH_PATTERNS:
-        clauses.append("i.file_path NOT LIKE ?")
-        params.append(f"%{pattern}%")
-
-    where = "WHERE " + " AND ".join(clauses) if clauses else ""
-
-    order = "ORDER BY RANDOM()" if sample else "ORDER BY i.date_taken DESC"
-    lim_clause = f"LIMIT {sample or limit or 999999}"
-
-    sql = f"""
-        SELECT i.id, i.file_name, i.date_taken, i.camera_short,
-               i.file_path, i.triptych_leg
-        FROM images i
-        {where}
-        {order}
-        {lim_clause}
-    """
-
-    rows = conn.execute(sql, params).fetchall()
+    rows = select_candidate_rows(
+        conn,
+        since=since,
+        camera=camera,
+        retag=retag,
+        manifest_path=manifest_path,
+        sample=sample,
+        limit=limit,
+    )
     total_raw = len(rows)
 
     if total_raw == 0:
@@ -615,6 +649,7 @@ Commands:
   --limit N                  Cap at N images
   --since YYYY-MM-DD         Only images from this date onward
   --camera BODY              Only images from this camera (e.g. S1IIE, Zf, XPro3)
+  --manifest PATH            Only tag images from one ingest batch
   --retag                    Redo already-tagged images
   --verbose                  Print descriptions and keywords for each image
   --no-skip-bursts           Disable burst stacking (tag every image individually)

@@ -31,7 +31,18 @@ if (
     print("DAM requires homebrew python: /opt/homebrew/bin/python3 dam.py")
     sys.exit(1)
 
-from dam_config import DAM_ROOT, DB_PATH, DEFAULT_VOLUMES, GUNICORN_WORKERS, IGNORE_VOLUMES, PORT, VOLUME_ALIASES, WINDOW_SIZE, cmd_config
+from dam_config import (
+    DAM_ROOT,
+    DB_PATH,
+    DEFAULT_VOLUMES,
+    GUNICORN_WORKERS,
+    IGNORE_VOLUMES,
+    LAST_INGEST_FILE,
+    PORT,
+    VOLUME_ALIASES,
+    WINDOW_SIZE,
+    cmd_config,
+)
 from platform_utils import spawn_background_process
 from storage_utils import resolve_archive_file
 
@@ -79,7 +90,10 @@ def cmd_ingest(args):
     else:
         print("\nDAM ── STEP 4/4 — AI Tagging (background)\n" + "-" * 50)
         tag_log = DAM_ROOT / "tagger_run.log"
-        spawn_background_process([sys.executable, str(TAGGER_SCRIPT)], tag_log, cwd=DAM_ROOT)
+        tag_cmd = [sys.executable, str(TAGGER_SCRIPT)]
+        if LAST_INGEST_FILE.exists():
+            tag_cmd.extend(["--manifest", str(LAST_INGEST_FILE)])
+        spawn_background_process(tag_cmd, tag_log, cwd=DAM_ROOT)
         print(f"  Tagger launched in background. Monitor: tail -f {tag_log}")
         print("\nIngest complete. AI tagging running in background.")
 

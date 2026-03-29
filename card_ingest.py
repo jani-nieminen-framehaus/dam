@@ -29,9 +29,9 @@ try:
 except ImportError:
     tqdm = None
 
-from dam_config import DEST_ROOT, IGNORE_VOLUMES, INGEST_STATUS_FILE, VOLUME_ALIASES
+from dam_config import DEST_ROOT, IGNORE_VOLUMES, INGEST_STATUS_FILE, LAST_INGEST_FILE, VOLUME_ALIASES
 from platform_utils import find_dcim_mounts, volume_label
-from storage_utils import choose_ingest_destination
+from storage_utils import choose_ingest_destination, logical_volume_for_root
 
 RAW_EXTENSIONS = {".rw2", ".nef", ".raf", ".arw", ".cr3", ".dng", ".orf"}
 JPEG_EXTENSIONS = {".jpg", ".jpeg"}
@@ -181,6 +181,7 @@ def ingest(card_path, dry_run=False):
     copied = 0
     skipped = 0
     errors = 0
+    manifest_paths: list[str] = []
 
     for date in sorted(by_date.keys()):
         date_files = by_date[date]
@@ -211,6 +212,7 @@ def ingest(card_path, dry_run=False):
             # HARD STOP on collision — never overwrite, never rename
             if dest_file.exists():
                 print(f"  SKIP (exists): {fname}")
+                manifest_paths.append(f"{date}/{fname}")
                 skipped += 1
                 continue
 
@@ -233,6 +235,7 @@ def ingest(card_path, dry_run=False):
                         msg = f"  OK: {fname} ({size_mb:.1f} MB) ✓"
                         if not tqdm:
                             print(msg)
+                        manifest_paths.append(f"{date}/{fname}")
                         copied += 1
                 except Exception as e:
                     msg = f"  ERROR: {fname} — {e}"
@@ -243,6 +246,20 @@ def ingest(card_path, dry_run=False):
                     errors += 1
 
     update_status("idle", total, total)
+    if not dry_run and manifest_paths:
+        try:
+            with open(LAST_INGEST_FILE, "w") as f:
+                json.dump(
+                    {
+                        "volume": logical_volume_for_root(dest_root, VOLUME_ALIASES),
+                        "dest_root": str(dest_root),
+                        "relative_paths": sorted(set(manifest_paths)),
+                        "timestamp": datetime.now().isoformat(),
+                    },
+                    f,
+                )
+        except OSError:
+            pass
 
     print(f"\n{'=' * 50}")
     print(f"Total files found: {total}")

@@ -63,7 +63,7 @@ def derive_legacy_identity(file_path: str | Path, aliases: dict[str, str] | None
 
 
 def _mount_rank(info: MountInfo) -> tuple[int, int, int]:
-    writable = int(not info.read_only)
+    writable = int(is_dir_writable(info.path))
     local = int(info.local)
     return (local, writable, free_bytes(info.path))
 
@@ -111,7 +111,7 @@ def choose_ingest_destination(
 ) -> Path | None:
     """Choose a writable local archive root, preferring the logical match for preferred_root."""
     mounts = find_archive_mounts(ignore_labels)
-    candidates = [m for m in mounts if m.local and not m.read_only]
+    candidates = [m for m in mounts if m.local and is_dir_writable(m.path)]
     if not candidates:
         return None
 

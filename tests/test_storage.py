@@ -44,6 +44,19 @@ def test_choose_ingest_destination_matches_preferred_alias(monkeypatch):
     assert chosen == Path("/Volumes/Photos2")
 
 
+def test_choose_ingest_destination_skips_unwritable_match(monkeypatch):
+    mounts = [
+        MountInfo(Path("/Volumes/Photos1"), "Photos1", "exfat", True, False),
+        MountInfo(Path("/Volumes/Photos2"), "Photos2", "exfat", True, False),
+    ]
+    monkeypatch.setattr("storage_utils.find_archive_mounts", lambda ignore: mounts)
+    monkeypatch.setattr("storage_utils.is_dir_writable", lambda path: path.name == "Photos1")
+    monkeypatch.setattr("storage_utils.free_bytes", lambda path: 200 if path.name.endswith("2") else 100)
+
+    chosen = choose_ingest_destination(Path("/Volumes/kuvia2"), set())
+    assert chosen == Path("/Volumes/Photos1")
+
+
 def test_resolve_archive_file_uses_alternate_root(tmp_path, monkeypatch):
     target_root = tmp_path / "Photos2"
     image = target_root / "2025-03-01" / "IMG001.RW2"
