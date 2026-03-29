@@ -11,6 +11,7 @@ Usage:
 
 import dam_config
 from dam_db import get_db
+from storage_utils import derive_legacy_identity
 
 # ============================================================
 # DATABASE SCHEMA
@@ -25,6 +26,7 @@ CREATE TABLE IF NOT EXISTS images (
     file_type TEXT,
     file_size INTEGER,
     volume TEXT,
+    relative_path TEXT,
     date_folder TEXT,
 
     -- EXIF: camera
@@ -201,5 +203,28 @@ def init_db():
     dam_config.THUMB_DIR.mkdir(parents=True, exist_ok=True)
     conn = get_db()
     conn.executescript(SCHEMA_SQL)
+    _migrate_storage_identity(conn)
     conn.commit()
     return conn
+
+
+def _migrate_storage_identity(conn):
+    """Backfill logical volume identity for existing rows on older schemas."""
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(images)")}
+    if "relative_path" not in columns:
+        conn.execute("ALTER TABLE images ADD COLUMN relative_path TEXT")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_relative_path ON images(relative_path)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_volume_relative_path ON images(volume, relative_path)")
+
+    rows = conn.execute("SELECT id, file_path, volume, relative_path FROM images").fetchall()
+    updates = []
+    for row in rows:
+        logical_volume, relative_path = derive_legacy_identity(row["file_path"], dam_config.VOLUME_ALIASES)
+        if logical_volume is None and row["volume"] is not None:
+            logical_volume = row["volume"]
+        if logical_volume == row["volume"] and relative_path == row["relative_path"]:
+            continue
+        updates.append((logical_volume, relative_path, row["id"]))
+
+    if updates:
+        conn.executemany("UPDATE images SET volume = ?, relative_path = ? WHERE id = ?", updates)

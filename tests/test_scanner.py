@@ -8,13 +8,16 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from dam_scanner import (
+    build_row,
     compute_season,
     compute_time_of_day,
     format_shutter_speed,
+    file_identity,
     get_camera_short,
     get_mount,
     parse_date_folder,
     parse_volume,
+    upsert_image,
 )
 
 # ── compute_time_of_day ──────────────────────────────────────────────────────
@@ -74,7 +77,7 @@ def test_compute_season(month, expected):
 
 
 def test_parse_volume_standard():
-    assert parse_volume("/Volumes/Kuvia1/2025-01-01/IMG.RW2") == "Kuvia1"
+    assert parse_volume("/Volumes/Kuvia1/2025-01-01/IMG.RW2") == "Archive 1"
 
 
 def test_parse_volume_no_volumes():
@@ -83,6 +86,10 @@ def test_parse_volume_no_volumes():
 
 def test_parse_volume_short_path():
     assert parse_volume("/Volumes") is None
+
+
+def test_parse_volume_windows_drive():
+    assert parse_volume(r"E:\Photos2\2025\IMG.RW2") == "E"
 
 
 # ── parse_date_folder ─────────────────────────────────────────────────────────
@@ -173,3 +180,53 @@ def test_discover_primary_files(tmp_path):
     assert "IMG002.JPG" in names
     # Sidecars are not primary
     assert "IMG001.xmp" not in names
+
+
+def test_upsert_image_inserts_new_row(db_conn, tmp_path):
+    """Scanner can insert a newly discovered image row into the DB."""
+    archive_root = tmp_path / "Photos2"
+    archive_root.mkdir()
+    image_path = archive_root / "2025-03-01" / "DSC0001.ARW"
+    image_path.parent.mkdir()
+    image_path.write_bytes(b"raw-data")
+
+    row = build_row(
+        image_path,
+        archive_root,
+        {
+            "Model": "ILCE-1",
+            "Make": "Sony",
+            "DateTimeOriginal": "2025:03:01 12:34:56",
+        },
+        {
+            "has_jpeg": 0,
+            "has_xmp": 0,
+            "has_on1": 0,
+            "has_radiant": 0,
+            "sidecar_count": 0,
+            "edited_anywhere": 0,
+        },
+    )
+
+    upsert_image(db_conn, row)
+    db_conn.commit()
+
+    inserted = db_conn.execute(
+        "SELECT file_name, relative_path FROM images WHERE file_name = ?",
+        ("DSC0001.ARW",),
+    ).fetchone()
+    assert inserted is not None
+    assert inserted["relative_path"] == "2025-03-01/DSC0001.ARW"
+
+
+def test_file_identity_uses_archive_root_for_dated_subfolder(tmp_path):
+    """Folder-scoped scans should still resolve to the containing archive root."""
+    archive_root = tmp_path / "Photos2"
+    dated_root = archive_root / "2026-03-28"
+    dated_root.mkdir(parents=True)
+    image_path = dated_root / "DSC02409.ARW"
+    image_path.write_bytes(b"raw-data")
+
+    identity = file_identity(image_path, [dated_root])
+
+    assert identity == ("Archive 2", "2026-03-28/DSC02409.ARW")

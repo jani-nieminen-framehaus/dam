@@ -29,8 +29,15 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-from dam_config import BATCH_SIZE, DB_PATH, DEFAULT_VOLUMES, THUMB_DIR, THUMB_WORKERS
+from dam_config import BATCH_SIZE, DB_PATH, DEFAULT_VOLUMES, IGNORE_VOLUMES, THUMB_DIR, THUMB_WORKERS, VOLUME_ALIASES
 from dam_schema import init_db
+from storage_utils import (
+    derive_legacy_identity,
+    logical_volume_for_root,
+    relative_path_from_root,
+    resolve_archive_file,
+    resolve_scan_roots,
+)
 
 # Primary files — these define an image group
 RAW_EXTENSIONS = {".rw2", ".nef", ".raf", ".arw", ".cr3", ".dng", ".orf"}
@@ -300,11 +307,9 @@ def get_mount(camera_short):
 
 
 def parse_volume(file_path):
-    """Extract volume name from path like /Volumes/Kuvia1/..."""
-    parts = Path(file_path).parts
-    if len(parts) >= 3 and parts[0] == "/" and parts[1] == "Volumes":
-        return parts[2]
-    return None
+    """Extract logical archive label from a file path."""
+    volume, _ = derive_legacy_identity(file_path, VOLUME_ALIASES)
+    return volume
 
 
 def parse_date_folder(file_path):
@@ -373,7 +378,7 @@ def safe_int(val):
 # ============================================================
 
 
-def build_row(file_path, exif, sidecars):
+def build_row(file_path, archive_root, exif, sidecars):
     """Build a dict of all fields for one image row."""
     fpath = Path(file_path)
     date_taken, hour, month = parse_date_taken(exif)
@@ -385,7 +390,8 @@ def build_row(file_path, exif, sidecars):
         "file_name": fpath.name,
         "file_type": fpath.suffix.lstrip(".").upper(),
         "file_size": fpath.stat().st_size if fpath.exists() else None,
-        "volume": parse_volume(str(fpath)),
+        "volume": logical_volume_for_root(archive_root, VOLUME_ALIASES),
+        "relative_path": relative_path_from_root(fpath, archive_root),
         "date_folder": parse_date_folder(str(fpath)),
         "camera_make": exif.get("Make"),
         "camera_model": camera_model,
@@ -430,7 +436,7 @@ def build_row(file_path, exif, sidecars):
 
 INSERT_SQL = """
 INSERT INTO images (
-    file_path, file_name, file_type, file_size, volume, date_folder,
+    file_path, file_name, file_type, file_size, volume, relative_path, date_folder,
     camera_make, camera_model, camera_serial, camera_short, mount,
     lens_model, lens_serial,
     date_taken, aperture, shutter_speed, iso,
@@ -442,7 +448,7 @@ INSERT INTO images (
     has_jpeg, has_xmp, has_on1, has_radiant,
     sidecar_count, edited_anywhere, orphan_jpeg
 ) VALUES (
-    :file_path, :file_name, :file_type, :file_size, :volume, :date_folder,
+    :file_path, :file_name, :file_type, :file_size, :volume, :relative_path, :date_folder,
     :camera_make, :camera_model, :camera_serial, :camera_short, :mount,
     :lens_model, :lens_serial,
     :date_taken, :aperture, :shutter_speed, :iso,
@@ -454,27 +460,53 @@ INSERT INTO images (
     :has_jpeg, :has_xmp, :has_on1, :has_radiant,
     :sidecar_count, :edited_anywhere, :orphan_jpeg
 )
-ON CONFLICT(file_path) DO UPDATE SET
-    file_size=excluded.file_size,
-    camera_make=excluded.camera_make, camera_model=excluded.camera_model,
-    camera_serial=excluded.camera_serial, camera_short=excluded.camera_short,
-    mount=excluded.mount, lens_model=excluded.lens_model,
-    lens_serial=excluded.lens_serial, date_taken=excluded.date_taken,
-    aperture=excluded.aperture, shutter_speed=excluded.shutter_speed,
-    iso=excluded.iso, focal_length=excluded.focal_length,
-    focal_length_35eq=excluded.focal_length_35eq,
-    exposure_comp=excluded.exposure_comp, metering_mode=excluded.metering_mode,
-    white_balance=excluded.white_balance, flash=excluded.flash,
-    width=excluded.width, height=excluded.height,
-    orientation=excluded.orientation, color_space=excluded.color_space,
-    bit_depth=excluded.bit_depth,
-    gps_lat=excluded.gps_lat, gps_lon=excluded.gps_lon, gps_alt=excluded.gps_alt,
-    time_of_day=excluded.time_of_day, season=excluded.season,
-    has_jpeg=excluded.has_jpeg, has_xmp=excluded.has_xmp,
-    has_on1=excluded.has_on1, has_radiant=excluded.has_radiant,
-    sidecar_count=excluded.sidecar_count, edited_anywhere=excluded.edited_anywhere,
-    orphan_jpeg=excluded.orphan_jpeg,
+"""
+
+UPDATE_SQL = """
+UPDATE images SET
+    file_path=:file_path,
+    file_name=:file_name,
+    file_type=:file_type,
+    file_size=:file_size,
+    volume=:volume,
+    relative_path=:relative_path,
+    date_folder=:date_folder,
+    camera_make=:camera_make,
+    camera_model=:camera_model,
+    camera_serial=:camera_serial,
+    camera_short=:camera_short,
+    mount=:mount,
+    lens_model=:lens_model,
+    lens_serial=:lens_serial,
+    date_taken=:date_taken,
+    aperture=:aperture,
+    shutter_speed=:shutter_speed,
+    iso=:iso,
+    focal_length=:focal_length,
+    focal_length_35eq=:focal_length_35eq,
+    exposure_comp=:exposure_comp,
+    metering_mode=:metering_mode,
+    white_balance=:white_balance,
+    flash=:flash,
+    width=:width,
+    height=:height,
+    orientation=:orientation,
+    color_space=:color_space,
+    bit_depth=:bit_depth,
+    gps_lat=:gps_lat,
+    gps_lon=:gps_lon,
+    gps_alt=:gps_alt,
+    time_of_day=:time_of_day,
+    season=:season,
+    has_jpeg=:has_jpeg,
+    has_xmp=:has_xmp,
+    has_on1=:has_on1,
+    has_radiant=:has_radiant,
+    sidecar_count=:sidecar_count,
+    edited_anywhere=:edited_anywhere,
+    orphan_jpeg=:orphan_jpeg,
     updated_at=CURRENT_TIMESTAMP
+WHERE id=:id
 """
 
 
@@ -533,6 +565,58 @@ def extract_thumbnail_file_only(file_path, image_id):
     return image_id, None
 
 
+def _match_root_for_path(file_path, roots):
+    path = Path(file_path).resolve()
+    best = None
+    best_len = -1
+    for root in roots:
+        root_path = Path(root).resolve()
+        try:
+            path.relative_to(root_path)
+        except ValueError:
+            continue
+        root_len = len(root_path.parts)
+        if root_len > best_len:
+            best = root
+            best_len = root_len
+    if best is not None:
+        best_path = Path(best)
+        try:
+            datetime.strptime(best_path.name, "%Y-%m-%d")
+        except ValueError:
+            return best
+        return best_path.parent
+    return best
+
+
+def file_identity(file_path, roots):
+    """Stable image identity independent of current mount label."""
+    root = _match_root_for_path(file_path, roots)
+    if root is not None:
+        return logical_volume_for_root(root, VOLUME_ALIASES), relative_path_from_root(file_path, root)
+    return derive_legacy_identity(file_path, VOLUME_ALIASES)
+
+
+def upsert_image(conn, row):
+    """Insert or update an image by logical archive identity."""
+    existing = None
+    if row["volume"] and row["relative_path"]:
+        existing = conn.execute(
+            "SELECT id FROM images WHERE volume = ? AND relative_path = ?",
+            (row["volume"], row["relative_path"]),
+        ).fetchone()
+    if existing is None:
+        existing = conn.execute("SELECT id FROM images WHERE file_path = ?", (row["file_path"],)).fetchone()
+
+    if existing is None:
+        conn.execute(INSERT_SQL, row)
+        return
+
+    payload = dict(row)
+    payload["id"] = existing["id"]
+    conn.execute(UPDATE_SQL, payload)
+
+
 def extract_thumbnail(file_path, image_id, conn):
     """Single-threaded wrapper — used during normal scan passes."""
     image_id, thumb_path = extract_thumbnail_file_only(file_path, image_id)
@@ -557,7 +641,7 @@ def _run_thumbnail_pass(conn):
     from concurrent.futures import ThreadPoolExecutor, as_completed
 
     cursor = conn.execute(
-        """SELECT id, file_path FROM images
+        """SELECT id, file_path, volume, relative_path FROM images
            WHERE id NOT IN (SELECT image_id FROM thumbnails)
            AND file_type IN ('RW2', 'NEF', 'RAF', 'ARW', 'CR3', 'DNG', 'ORF',
                              'JPG', 'JPEG')"""
@@ -575,10 +659,20 @@ def _run_thumbnail_pass(conn):
     errors = 0
 
     with ThreadPoolExecutor(max_workers=THUMB_WORKERS) as executor:
-        future_to_row = {
-            executor.submit(extract_thumbnail_file_only, file_path, image_id): (image_id, file_path)
-            for image_id, file_path in rows
-        }
+        future_to_row = {}
+        for row in rows:
+            resolved = resolve_archive_file(
+                row["file_path"],
+                row["volume"],
+                row["relative_path"],
+                DEFAULT_VOLUMES,
+                IGNORE_VOLUMES,
+                VOLUME_ALIASES,
+            )
+            if resolved is None:
+                errors += 1
+                continue
+            future_to_row[executor.submit(extract_thumbnail_file_only, resolved, row["id"])] = (row["id"], str(resolved))
         for future in as_completed(future_to_row):
             try:
                 image_id, thumb_path = future.result()
@@ -612,10 +706,10 @@ def _run_thumbnail_pass(conn):
 # ============================================================
 
 
-def get_indexed_paths(conn):
-    """Return set of all file_paths already in DB."""
-    cursor = conn.execute("SELECT file_path FROM images")
-    return {row[0] for row in cursor.fetchall()}
+def get_indexed_identities(conn):
+    """Return set of logical archive identities already in DB."""
+    cursor = conn.execute("SELECT volume, relative_path FROM images WHERE volume IS NOT NULL AND relative_path IS NOT NULL")
+    return {(row[0], row[1]) for row in cursor.fetchall()}
 
 
 def show_stats(conn):
@@ -693,8 +787,8 @@ def scan(volumes, rescan=False, dry_run=False, extract_thumbs=True):
         to_scan = all_files
         print(f"\n[2/4] Rescan mode — processing all {len(to_scan):,} files")
     else:
-        indexed = get_indexed_paths(conn)
-        to_scan = [f for f in all_files if str(f) not in indexed]
+        indexed = get_indexed_identities(conn)
+        to_scan = [f for f in all_files if file_identity(f, volumes) not in indexed]
         print(f"\n[2/4] Already indexed: {len(indexed):,}, new: {len(to_scan):,}")
 
     if not to_scan:
@@ -726,8 +820,9 @@ def scan(volumes, rescan=False, dry_run=False, extract_thumbs=True):
             try:
                 exif = exif_data.get(str(fpath), {})
                 sidecars = detect_sidecars(fpath)
-                row = build_row(fpath, exif, sidecars)
-                conn.execute(INSERT_SQL, row)
+                archive_root = _match_root_for_path(fpath, volumes)
+                row = build_row(fpath, archive_root or fpath.parent, exif, sidecars)
+                upsert_image(conn, row)
                 processed += 1
             except Exception as e:
                 print(f"  ERROR: {fpath.name} — {e}")
@@ -770,7 +865,7 @@ if __name__ == "__main__":
         conn.close()
         sys.exit(0)
 
-    volumes = [Path(p) for p in paths] if paths else DEFAULT_VOLUMES
+    volumes = [Path(p) for p in paths] if paths else resolve_scan_roots(DEFAULT_VOLUMES, IGNORE_VOLUMES, VOLUME_ALIASES)
 
     # --no-scan: skip file discovery and indexing, only generate thumbnails
     if "--no-scan" in flags:

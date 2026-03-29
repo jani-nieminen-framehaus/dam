@@ -22,6 +22,7 @@ DEFAULTS = {
     "thumb_dir": None,  # derived: dam_root/thumbs
     "dest_root": "/Volumes/kuvia2",
     "default_volumes": ["/Volumes/Kuvia1", "/Volumes/kuvia2"],
+    "volume_aliases": {},
     "ignore_volumes": [
         "Macintosh HD",
         "Macintosh HD - Data",
@@ -102,6 +103,7 @@ def _load_config():
 
     cfg["dest_root"] = Path(cfg["dest_root"])
     cfg["default_volumes"] = [Path(v) for v in cfg["default_volumes"]]
+    cfg["volume_aliases"] = dict(cfg.get("volume_aliases") or {})
     cfg["ignore_volumes"] = set(cfg["ignore_volumes"])
 
     return cfg
@@ -116,6 +118,7 @@ THUMB_DIR = _cfg["thumb_dir"]
 SPA_DIR = DAM_ROOT / "static"
 DEST_ROOT = _cfg["dest_root"]
 DEFAULT_VOLUMES = _cfg["default_volumes"]
+VOLUME_ALIASES = _cfg["volume_aliases"]
 IGNORE_VOLUMES = _cfg["ignore_volumes"]
 
 OLLAMA_BASE = _cfg["ollama_base"]

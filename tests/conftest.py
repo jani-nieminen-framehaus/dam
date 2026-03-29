@@ -68,7 +68,8 @@ def sample_image_row():
         "file_path": "/Volumes/kuvia2/2025-03-01/P1000001.RW2",
         "file_name": "P1000001.RW2",
         "file_type": "RW2",
-        "volume": "kuvia2",
+        "volume": "Archive 2",
+        "relative_path": "2025-03-01/P1000001.RW2",
         "date_folder": "2025-03-01",
         "date_taken": "2025-03-01T14:30:00",
         "camera_short": "S1IIE",
@@ -88,6 +89,7 @@ def db_with_images(db_conn, sample_image_row):
         row = dict(sample_image_row)
         row["file_path"] = f"/Volumes/kuvia2/2025-03-01/P100000{i}.RW2"
         row["file_name"] = f"P100000{i}.RW2"
+        row["relative_path"] = f"2025-03-01/P100000{i}.RW2"
         cols = ", ".join(row.keys())
         placeholders = ", ".join(["?"] * len(row))
         db_conn.execute(f"INSERT INTO images ({cols}) VALUES ({placeholders})", list(row.values()))

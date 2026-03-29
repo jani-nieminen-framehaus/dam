@@ -29,7 +29,9 @@ try:
 except ImportError:
     tqdm = None
 
-from dam_config import DEST_ROOT, IGNORE_VOLUMES, INGEST_STATUS_FILE
+from dam_config import DEST_ROOT, IGNORE_VOLUMES, INGEST_STATUS_FILE, VOLUME_ALIASES
+from platform_utils import find_dcim_mounts, volume_label
+from storage_utils import choose_ingest_destination
 
 RAW_EXTENSIONS = {".rw2", ".nef", ".raf", ".arw", ".cr3", ".dng", ".orf"}
 JPEG_EXTENSIONS = {".jpg", ".jpeg"}
@@ -43,22 +45,40 @@ def md5_file(filepath):
         return hashlib.file_digest(f, "md5").hexdigest()
 
 
+def copy_file_with_md5(src_path, dst_path, chunk_size=4 * 1024 * 1024):
+    """
+    Copy a file while hashing the source stream in the same pass.
+
+    This removes one full reread from the source card while keeping
+    end-to-end verification against a separately hashed destination file.
+    """
+    digest = hashlib.md5()
+    try:
+        with open(src_path, "rb") as src_file, open(dst_path, "xb") as dst_file:
+            while chunk := src_file.read(chunk_size):
+                digest.update(chunk)
+                dst_file.write(chunk)
+            dst_file.flush()
+            os.fsync(dst_file.fileno())
+        shutil.copystat(src_path, dst_path)
+    except Exception:
+        try:
+            Path(dst_path).unlink()
+        except FileNotFoundError:
+            pass
+        raise
+    return digest.hexdigest()
+
+
 def find_card():
     """Auto-detect mounted memory card by looking for DCIM folder."""
-    volumes = Path("/Volumes")
-    candidates = []
-    for vol in volumes.iterdir():
-        if vol.name in IGNORE_VOLUMES:
-            continue
-        dcim = vol / "DCIM"
-        if dcim.exists() and dcim.is_dir():
-            candidates.append(dcim)
+    candidates = [mount / "DCIM" for mount in find_dcim_mounts(IGNORE_VOLUMES)]
     if len(candidates) == 1:
         return candidates[0]
     elif len(candidates) > 1:
         print("Multiple cards detected:")
         for i, c in enumerate(candidates):
-            print(f"  [{i}] {c.parent.name}")
+            print(f"  [{i}] {volume_label(c.parent)}")
         choice = input("Select card number: ")
         return candidates[int(choice)]
     else:
@@ -98,7 +118,11 @@ def collect_files(card_path):
             ext = Path(fname).suffix.lower()
             if ext in ALL_EXTENSIONS:
                 full_path = Path(root) / fname
-                date = get_date_exiftool(full_path)
+                try:
+                    date = get_date_exiftool(full_path)
+                except FileNotFoundError:
+                    # Card contents can change while scanning; skip vanished files.
+                    continue
                 files.append((full_path, date, fname))
     return files
 
@@ -106,6 +130,7 @@ def collect_files(card_path):
 def ingest(card_path, dry_run=False):
     """Main ingest: copy files from card to dated folders on kuvia2."""
     progress_file = INGEST_STATUS_FILE
+    dest_root = choose_ingest_destination(DEST_ROOT, IGNORE_VOLUMES, VOLUME_ALIASES)
 
     def update_status(status, current=0, total=0):
         if dry_run:
@@ -120,13 +145,22 @@ def ingest(card_path, dry_run=False):
 
     update_status("scanning", 0, 0)
 
-    if not DEST_ROOT.exists():
-        print(f"ERROR: Destination {DEST_ROOT} not mounted!")
+    if dest_root is None:
+        print(f"ERROR: No writable local archive volume detected. Preferred archive: {DEST_ROOT}")
         update_status("error")
         sys.exit(1)
+    if not dry_run:
+        probe = dest_root / ".dam_write_probe"
+        try:
+            probe.mkdir(exist_ok=True)
+            probe.rmdir()
+        except PermissionError:
+            print(f"ERROR: Destination {dest_root} is mounted but not writable by current user.")
+            update_status("error")
+            sys.exit(1)
 
     print(f"Source: {card_path}")
-    print(f"Destination: {DEST_ROOT}")
+    print(f"Destination: {dest_root}")
     print(f"Mode: {'DRY RUN' if dry_run else 'LIVE COPY'}")
     print()
 
@@ -150,14 +184,19 @@ def ingest(card_path, dry_run=False):
 
     for date in sorted(by_date.keys()):
         date_files = by_date[date]
-        dest_dir = Path(DEST_ROOT) / str(date)
+        dest_dir = dest_root / str(date)
 
         # Don't print header if we have tqdm
         if dry_run or not tqdm:
             print(f"\n[{date}] — {len(date_files)} files")
 
         if not dry_run:
-            dest_dir.mkdir(parents=True, exist_ok=True)
+            try:
+                dest_dir.mkdir(parents=True, exist_ok=True)
+            except PermissionError:
+                print(f"ERROR: Cannot create destination folder: {dest_dir} (permission denied)")
+                update_status("error")
+                sys.exit(1)
 
         iterator = date_files
         if not dry_run and tqdm:
@@ -181,9 +220,8 @@ def ingest(card_path, dry_run=False):
                 copied += 1
             else:
                 try:
-                    shutil.copy2(str(fpath), str(dest_file))
-                    # Verify checksum
-                    src_hash = md5_file(fpath)
+                    src_hash = copy_file_with_md5(fpath, dest_file)
+                    # Verify checksum end-to-end against the written destination file.
                     dst_hash = md5_file(dest_file)
                     if src_hash != dst_hash:
                         print(f"  CHECKSUM FAIL: {fname} — removing bad copy!")

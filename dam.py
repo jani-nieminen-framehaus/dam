@@ -31,7 +31,9 @@ if (
     print("DAM requires homebrew python: /opt/homebrew/bin/python3 dam.py")
     sys.exit(1)
 
-from dam_config import DAM_ROOT, DB_PATH, GUNICORN_WORKERS, PORT, WINDOW_SIZE, cmd_config
+from dam_config import DAM_ROOT, DB_PATH, DEFAULT_VOLUMES, GUNICORN_WORKERS, IGNORE_VOLUMES, PORT, VOLUME_ALIASES, WINDOW_SIZE, cmd_config
+from platform_utils import spawn_background_process
+from storage_utils import resolve_archive_file
 
 INGEST_SCRIPT = DAM_ROOT / "card_ingest.py"
 SCANNER_SCRIPT = DAM_ROOT / "dam_scanner.py"
@@ -77,8 +79,7 @@ def cmd_ingest(args):
     else:
         print("\nDAM ── STEP 4/4 — AI Tagging (background)\n" + "-" * 50)
         tag_log = DAM_ROOT / "tagger_run.log"
-        tag_cmd = f"nohup {sys.executable} {TAGGER_SCRIPT} >> {tag_log} 2>&1 &"
-        subprocess.Popen(tag_cmd, shell=True, cwd=str(DAM_ROOT))
+        spawn_background_process([sys.executable, str(TAGGER_SCRIPT)], tag_log, cwd=DAM_ROOT)
         print(f"  Tagger launched in background. Monitor: tail -f {tag_log}")
         print("\nIngest complete. AI tagging running in background.")
 
@@ -329,7 +330,10 @@ def cmd_export(args):
         params.append(edit_status)
 
     where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
-    sql = f"SELECT id, file_path, file_name, date_folder, has_jpeg, orphan_jpeg FROM images {where} ORDER BY date_taken DESC"
+    sql = (
+        "SELECT id, file_path, file_name, volume, relative_path, date_folder, has_jpeg, orphan_jpeg "
+        f"FROM images {where} ORDER BY date_taken DESC"
+    )
 
     conn = sqlite3.connect(str(DB_PATH))
     conn.row_factory = sqlite3.Row
@@ -388,7 +392,10 @@ def cmd_export(args):
     print("-" * 50)
 
     for row in rows:
-        file_path = row["file_path"]
+        resolved = resolve_archive_file(
+            row["file_path"], row["volume"], row["relative_path"], DEFAULT_VOLUMES, IGNORE_VOLUMES, VOLUME_ALIASES
+        )
+        file_path = str(resolved) if resolved else row["file_path"]
         date_folder = row["date_folder"] or "undated"
         is_orphan = row["orphan_jpeg"]
 

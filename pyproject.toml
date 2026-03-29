@@ -37,6 +37,8 @@ py-modules = [
     "dam_tagger",
     "card_ingest",
     "card_watcher",
+    "platform_utils",
+    "storage_utils",
 ]
 
 [tool.setuptools.package-data]

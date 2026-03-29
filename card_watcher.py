@@ -12,13 +12,15 @@ import contextlib
 import logging
 import os
 import subprocess
+import sys
 import time
 from pathlib import Path
 
 from dam_config import DAM_ROOT, IGNORE_VOLUMES, INGEST_TIMEOUT, POLL_INTERVAL
+from platform_utils import find_dcim_mounts, notify_desktop, volume_label
 
 DAM_SCRIPT = DAM_ROOT / "dam.py"
-PYTHON = "/opt/homebrew/bin/python3"
+PYTHON = sys.executable
 LOG_FILE = DAM_ROOT / "card_watcher.log"
 
 # ── Logging ────────────────────────────────────────────────────────
@@ -42,34 +44,16 @@ def get_mounted_cards():
 
     Logs each volume's status for diagnostics (helps debug CFexpress detection).
     """
-    cards = set()
-    volumes = Path("/Volumes")
-    if not volumes.exists():
-        return cards
-    for vol in volumes.iterdir():
-        if vol.name in IGNORE_VOLUMES:
-            log.debug(f"  Volume {vol.name}: skipped (in IGNORE_VOLUMES)")
-            continue
-        dcim = vol / "DCIM"
-        if dcim.exists() and dcim.is_dir():
-            cards.add(str(vol))
-            log.debug(f"  Volume {vol.name}: DCIM found — card detected")
-        else:
-            log.debug(f"  Volume {vol.name}: no DCIM folder")
+    cards = {str(p) for p in find_dcim_mounts(IGNORE_VOLUMES)}
+    for p in sorted(cards):
+        log.debug(f"  Volume {volume_label(Path(p))}: DCIM found — card detected")
     return cards
 
 
 def notify(title, message):
-    """macOS notification via osascript."""
+    """Best-effort desktop notification."""
     with contextlib.suppress(Exception):
-        subprocess.run(
-            [
-                "osascript",
-                "-e",
-                f'display notification "{message}" with title "{title}"',
-            ],
-            timeout=5,
-        )
+        notify_desktop(title, message)
 
 
 def run_ingest(card_path):
@@ -83,7 +67,8 @@ def run_ingest(card_path):
 
     # LaunchAgents get minimal PATH — ensure homebrew tools are available
     env = os.environ.copy()
-    env["PATH"] = "/opt/homebrew/bin:/opt/homebrew/sbin:" + env.get("PATH", "/usr/bin:/bin")
+    if sys.platform == "darwin":
+        env["PATH"] = "/opt/homebrew/bin:/opt/homebrew/sbin:" + env.get("PATH", "/usr/bin:/bin")
 
     start = time.time()
     try:
@@ -124,7 +109,7 @@ def run_ingest(card_path):
 
 def main():
     log.info("DAM Card Watcher started")
-    log.info(f"  Polling /Volumes every {POLL_INTERVAL}s")
+    log.info(f"  Polling mounted volumes every {POLL_INTERVAL}s")
     log.info(f"  Ignoring: {', '.join(sorted(IGNORE_VOLUMES))}")
 
     global seen_cards
@@ -132,7 +117,7 @@ def main():
     # (don't re-ingest cards that were already in when watcher started)
     seen_cards = get_mounted_cards()
     if seen_cards:
-        log.info(f"  Already mounted (skipping): {', '.join(Path(c).name for c in seen_cards)}")
+        log.info(f"  Already mounted (skipping): {', '.join(volume_label(Path(c)) for c in seen_cards)}")
 
     while True:
         try:

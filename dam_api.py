@@ -35,14 +35,19 @@ from pathlib import Path
 from flask import Flask, abort, jsonify, request, send_from_directory
 
 from dam_config import (
+    DEFAULT_VOLUMES,
     EMBED_MODEL,
+    IGNORE_VOLUMES,
     INGEST_STATUS_FILE,
     OLLAMA_BASE,
     PAGE_SIZE,
     SPA_DIR,
     THUMB_DIR,
+    VOLUME_ALIASES,
 )
 from dam_db import get_db
+from platform_utils import open_path_external
+from storage_utils import resolve_archive_file
 
 app = Flask(__name__, static_folder=None)
 
@@ -625,29 +630,26 @@ def image_remove_keyword(image_id, keyword):
 def image_open_external(image_id):
     db = get_db()
     try:
-        row = db.execute("SELECT file_path FROM images WHERE id = ?", (image_id,)).fetchone()
+        row = db.execute("SELECT file_path, volume, relative_path FROM images WHERE id = ?", (image_id,)).fetchone()
     finally:
         db.close()
 
     if not row or not row["file_path"]:
         abort(404)
 
-    abs_path = row["file_path"]
-    if not os.path.exists(abs_path):
+    resolved = resolve_archive_file(
+        row["file_path"], row["volume"], row["relative_path"], DEFAULT_VOLUMES, IGNORE_VOLUMES, VOLUME_ALIASES
+    )
+    if resolved is None:
         return jsonify({"error": "File not found on disk"}), 404
 
     data = request.get_json(silent=True) or {}
     app_name = data.get("app")
 
     try:
-        if app_name:
-            subprocess.run(["open", "-a", app_name, abs_path], check=True)
-        else:
-            # -W = wait for app, -n = open new instance, but without -a it just opens "With..." dialog
-            # Actually, standard "open" without -a opens the default app.
-            subprocess.run(["open", abs_path], check=True)
+        open_path_external(resolved, app_name=app_name)
         return jsonify({"success": True, "action": "opened_external"})
-    except subprocess.CalledProcessError as e:
+    except (subprocess.CalledProcessError, OSError) as e:
         return jsonify({"error": f"Launch failed: {e}"}), 500
 
 
@@ -655,7 +657,7 @@ def image_open_external(image_id):
 def image_open_jpeg(image_id):
     db = get_db()
     try:
-        row = db.execute("SELECT file_path, has_jpeg FROM images WHERE id = ?", (image_id,)).fetchone()
+        row = db.execute("SELECT file_path, volume, relative_path, has_jpeg FROM images WHERE id = ?", (image_id,)).fetchone()
     finally:
         db.close()
 
@@ -663,9 +665,12 @@ def image_open_jpeg(image_id):
         abort(404)
 
     # If the primary file has a JPEG sidecar, find and open it
-    target_path = row["file_path"]
+    resolved = resolve_archive_file(
+        row["file_path"], row["volume"], row["relative_path"], DEFAULT_VOLUMES, IGNORE_VOLUMES, VOLUME_ALIASES
+    )
+    target_path = str(resolved) if resolved else row["file_path"]
     if row["has_jpeg"]:
-        jpeg = _find_jpeg_sidecar(row["file_path"])
+        jpeg = _find_jpeg_sidecar(target_path)
         if jpeg:
             target_path = str(jpeg)
 
@@ -673,9 +678,9 @@ def image_open_jpeg(image_id):
         return jsonify({"error": "File not found on disk"}), 404
 
     try:
-        subprocess.run(["open", target_path], check=True)
+        open_path_external(target_path)
         return jsonify({"success": True, "action": "opened_jpeg"})
-    except subprocess.CalledProcessError as e:
+    except (subprocess.CalledProcessError, OSError) as e:
         return jsonify({"error": f"Launch failed: {e}"}), 500
 
 
