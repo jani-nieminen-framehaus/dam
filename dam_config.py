@@ -38,6 +38,9 @@ DEFAULTS = {
         "com.apple.TimeMachine.localsnapshots",
     ],
     "ollama_base": "http://localhost:11434",
+    "ollama_base_embed": None,
+    "ollama_base_vision": None,
+    "ollama_base_text": None,
     "vision_model": "llava:34b",
     "text_model": "llama3.1:70b",
     "embed_model": "nomic-embed-text",
@@ -116,6 +119,9 @@ DEFAULT_VOLUMES = _cfg["default_volumes"]
 IGNORE_VOLUMES = _cfg["ignore_volumes"]
 
 OLLAMA_BASE = _cfg["ollama_base"]
+OLLAMA_BASE_EMBED = _cfg.get("ollama_base_embed") or OLLAMA_BASE
+OLLAMA_BASE_VISION = _cfg.get("ollama_base_vision") or OLLAMA_BASE
+OLLAMA_BASE_TEXT = _cfg.get("ollama_base_text") or OLLAMA_BASE
 VISION_MODEL = _cfg["vision_model"]
 TEXT_MODEL = _cfg["text_model"]
 EMBED_MODEL = _cfg["embed_model"]

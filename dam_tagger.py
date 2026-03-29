@@ -40,6 +40,9 @@ from dam_config import (
     EMBED_MODEL,
     MODEL_CTX,
     OLLAMA_BASE,
+    OLLAMA_BASE_EMBED,
+    OLLAMA_BASE_TEXT,
+    OLLAMA_BASE_VISION,
     SKIP_PATH_PATTERNS,
     TEXT_MODEL,
     THUMB_DIR,
@@ -76,9 +79,9 @@ Return valid JSON only."""
 # ── Ollama API ─────────────────────────────────────────────────────────────────
 
 
-def ollama_post(endpoint, payload, timeout=120):
+def ollama_post(endpoint, payload, timeout=120, base_url=None):
     """POST to Ollama API, return parsed JSON."""
-    url = f"{OLLAMA_BASE}{endpoint}"
+    url = f"{base_url or OLLAMA_BASE}{endpoint}"
     data = json.dumps(payload).encode()
     req = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json"}, method="POST")
     try:
@@ -89,22 +92,26 @@ def ollama_post(endpoint, payload, timeout=120):
 
 
 def check_models():
-    """Verify required models are available."""
+    """Verify required models are available on their respective endpoints."""
     import urllib.request
 
-    try:
-        url = f"{OLLAMA_BASE}/api/tags"
-        with urllib.request.urlopen(url, timeout=5) as resp:
-            data = json.loads(resp.read().decode())
-        available = {m["name"] for m in data.get("models", [])}
-        required = [VISION_MODEL, TEXT_MODEL, EMBED_MODEL]
-        missing = []
-        for model in required:
+    model_endpoints = [
+        (VISION_MODEL, OLLAMA_BASE_VISION),
+        (TEXT_MODEL, OLLAMA_BASE_TEXT),
+        (EMBED_MODEL, OLLAMA_BASE_EMBED),
+    ]
+    missing = []
+    for model, base in model_endpoints:
+        try:
+            url = f"{base}/api/tags"
+            with urllib.request.urlopen(url, timeout=5) as resp:
+                data = json.loads(resp.read().decode())
+            available = {m["name"] for m in data.get("models", [])}
             if not any(model in a for a in available):
-                missing.append(model)
-        return missing
-    except Exception as e:
-        raise RuntimeError(f"Cannot connect to Ollama: {e}") from e
+                missing.append(f"{model} (on {base})")
+        except Exception as e:
+            missing.append(f"{model} (endpoint {base} unreachable: {e})")
+    return missing
 
 
 def vision_describe(image_b64):
@@ -123,6 +130,7 @@ def vision_describe(image_b64):
             },
         },
         timeout=180,
+        base_url=OLLAMA_BASE_VISION,
     )
     return resp.get("response", "").strip()
 
@@ -143,6 +151,7 @@ def text_extract_keywords(description):
             },
         },
         timeout=180,
+        base_url=OLLAMA_BASE_TEXT,
     )  # 70b needs more time, especially on first load
     raw = resp.get("response", "").strip()
     # Strip any accidental markdown fences
@@ -170,6 +179,7 @@ def embed_text(text):
             "prompt": text,
         },
         timeout=30,
+        base_url=OLLAMA_BASE_EMBED,
     )
     return resp.get("embedding", [])
 
@@ -346,11 +356,13 @@ def tag_images(args):
             "options": {"num_predict": 1, "num_ctx": MODEL_CTX},
         },
         timeout=60,
+        base_url=OLLAMA_BASE_VISION,
     )
     ollama_post(
         "/api/generate",
         {"model": TEXT_MODEL, "prompt": "warmup", "stream": False, "options": {"num_predict": 1, "num_ctx": MODEL_CTX}},
         timeout=120,
+        base_url=OLLAMA_BASE_TEXT,
     )
     print("  ✓ All models loaded\n")
 
