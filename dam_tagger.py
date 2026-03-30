@@ -5,7 +5,7 @@ DAM Tagger — AI keywording + semantic search embeddings
 Pipeline per image:
   1. Load thumbnail (never touches RAW)
   2. LLaVA 34b → documentary description
-  3. Llama 3.1 70b → structured keyword extraction
+  3. dam-tagger (fine-tuned Mistral 7B) → keyword extraction in photographer's style
   4. nomic-embed-text → 768-dim embedding for semantic search
   5. Write description + keywords + embedding back to DB
 
@@ -19,7 +19,7 @@ Usage:
     python3 dam_tagger.py --search "isolation"   # semantic search demo (no tagging)
 
 Models required (must be in Ollama):
-    ollama list should show: llava:34b, llama3.1:8b, nomic-embed-text
+    ollama list should show: llava:34b, dam-tagger, nomic-embed-text
 """
 
 import base64
@@ -54,26 +54,13 @@ from dam_db import get_db
 
 VISION_PROMPT = """You are writing catalog entries for a documentary photography archive. Describe what is in this photograph in 2-4 short, factual sentences. Name specific subjects, objects, settings, and actions. Mention light quality only if distinctive. Do NOT start with "The photograph", "In the image", "The image captures", "This photograph" or similar. Start directly with the subject. Do NOT use phrases like "adding to the sense of", "suggesting a", "serves to highlight", "drawing the viewer's eye". Be concrete, not interpretive."""
 
-KEYWORD_PROMPT = """Extract search keywords from this documentary photograph description.
+TAGGER_PROMPT = """Description: {description}
+Technical: {technical}
+Context: {context}"""
 
-Description:
-{description}
-
-Return ONLY a JSON object with these exact fields — no other text, no markdown:
-{{
-  "factual": ["list", "of", "factual", "tags"],
-  "mood": ["emotional", "thematic", "tags"],
-  "technical": ["technical", "photographic", "tags"],
-  "triptych_relevant": true_or_false
-}}
-
-Rules:
-- factual: concrete, specific subjects, objects, settings, people, actions (e.g. "elderly man", "window", "hospital bed", "hands", "rocking chair", "kitchen"). Exclude generic words like "background", "composition", "lighting", "shadows", "room", "objects", "camera".
-- mood: emotional and thematic descriptors (e.g. "isolation", "intimacy", "grief", "waiting", "dignity"). Only include moods actually evoked, not generic labels.
-- technical: specific photographic qualities (e.g. "shallow depth of field", "backlit", "high contrast", "motion blur"). Exclude vague phrases like "soft and diffused lighting".
-- triptych_relevant: true if the image could relate to themes of care, aging, memory, family, illness, or passage of time
-
-Return valid JSON only."""
+TRIPTYCH_THEMES = {"care", "aging", "memory", "family", "illness", "passage of time",
+                   "elderly", "hospital", "grief", "waiting", "dignity", "hands",
+                   "vulnerability", "tenderness", "intimacy", "nurturing", "protection"}
 
 
 # ── Ollama API ─────────────────────────────────────────────────────────────────
@@ -135,9 +122,19 @@ def vision_describe(image_b64):
     return resp.get("response", "").strip()
 
 
-def text_extract_keywords(description):
-    """Run Llama on description, return parsed keyword dict."""
-    prompt = KEYWORD_PROMPT.format(description=description)
+def text_extract_keywords(description, technical="", context=""):
+    """Run dam-tagger (fine-tuned Mistral 7B) on description, return keyword dict.
+
+    The dam-tagger model outputs comma-separated keywords trained on the
+    photographer's own tagging style. We parse and deduplicate the output,
+    then classify keywords into factual/mood/technical categories for
+    backwards compatibility with the existing DB schema.
+    """
+    prompt = TAGGER_PROMPT.format(
+        description=description,
+        technical=technical or "N/A",
+        context=context or "N/A",
+    )
     resp = ollama_post(
         "/api/generate",
         {
@@ -145,29 +142,73 @@ def text_extract_keywords(description):
             "prompt": prompt,
             "stream": False,
             "options": {
-                "temperature": 0.1,
-                "num_predict": 400,
-                "num_ctx": MODEL_CTX,
+                "num_predict": 80,
             },
         },
-        timeout=180,
+        timeout=60,
         base_url=OLLAMA_BASE_TEXT,
-    )  # 70b needs more time, especially on first load
+    )
     raw = resp.get("response", "").strip()
-    # Strip any accidental markdown fences
-    raw = raw.replace("```json", "").replace("```", "").strip()
-    try:
-        return json.loads(raw)
-    except json.JSONDecodeError:
-        # Try to find JSON object in the response
-        start = raw.find("{")
-        end = raw.rfind("}") + 1
-        if start >= 0 and end > start:
-            try:
-                return json.loads(raw[start:end])
-            except json.JSONDecodeError:
-                pass
-    return {"factual": [], "mood": [], "technical": [], "triptych_relevant": False}
+
+    # Trim at first newline or closing paren (model sometimes leaks past keywords)
+    for stop_char in ("\n", ")", "Technical", "Note"):
+        idx = raw.find(stop_char)
+        if idx > 0:
+            raw = raw[:idx]
+
+    # Parse comma-separated keywords, deduplicate, clean
+    seen = set()
+    keywords = []
+    for kw in raw.split(","):
+        kw = kw.strip().strip('"').strip("'").strip()
+        kw_lower = kw.lower()
+        if kw and len(kw) > 1 and kw_lower not in seen:
+            seen.add(kw_lower)
+            keywords.append(kw_lower)
+
+    # Cap at 12 keywords
+    keywords = keywords[:12]
+
+    # Classify into categories for DB compatibility
+    mood_words = {
+        "serenity", "serene", "tranquil", "tranquility", "melancholy",
+        "contemplation", "contemplative", "warmth", "isolation", "solitude",
+        "joy", "stillness", "quietness", "nostalgia", "intimacy", "tension",
+        "calm", "calmness", "peaceful", "peacefulness", "moody", "dramatic",
+        "gentle", "harsh", "somber", "ethereal", "dreamlike", "gritty", "raw",
+        "tender", "tenderness", "playful", "playfulness", "mysterious",
+        "desolate", "vulnerability", "innocence", "happiness", "domesticity",
+        "engagement", "curiosity", "protection", "nurturing", "emptiness",
+        "dignity", "grief", "waiting", "seclusion", "quietude",
+    }
+    technical_words = {
+        "shallow depth of field", "high contrast", "backlit", "motion blur",
+        "long exposure", "soft lighting", "natural light", "artificial lighting",
+        "high-key lighting", "low light", "macro photography", "close-up",
+        "straight-on composition", "flat lighting", "diffused light",
+        "soft shadows", "even lighting", "dimmed lighting",
+    }
+
+    factual = []
+    mood = []
+    technical = []
+    for kw in keywords:
+        if kw in mood_words:
+            mood.append(kw)
+        elif kw in technical_words:
+            technical.append(kw)
+        else:
+            factual.append(kw)
+
+    # Infer triptych relevance from keywords
+    triptych = bool(seen & TRIPTYCH_THEMES)
+
+    return {
+        "factual": factual,
+        "mood": mood,
+        "technical": technical,
+        "triptych_relevant": triptych,
+    }
 
 
 def embed_text(text):
@@ -507,7 +548,7 @@ def tag_images(args):
                         print(f"    {line.strip()}.")
                 print()
 
-            # Step 3: keyword extraction
+            # Step 3: keyword extraction (dam-tagger: fine-tuned on photographer's style)
             t0 = time.time()
             kw_dict = text_extract_keywords(description)
             t_kw = time.time() - t0

@@ -43,7 +43,7 @@ DEFAULTS = {
     "ollama_base_vision": None,
     "ollama_base_text": None,
     "vision_model": "llava:34b",
-    "text_model": "llama3.1:70b",
+    "text_model": "dam-tagger",
     "embed_model": "nomic-embed-text",
     "embed_dim": 768,
     "model_ctx": 2048,
