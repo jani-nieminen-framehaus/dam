@@ -39,16 +39,23 @@ def relative_path_from_root(file_path: str | Path, root: str | Path) -> str | No
         return None
 
 
+def _parse_windows_drive(raw: str, aliases: dict[str, str] | None) -> tuple[str | None, str | None] | None:
+    """Parse a Windows drive letter path (e.g. D:\\Photos\\...). Returns None if not a drive path."""
+    if len(raw) < 2 or raw[1] != ":" or not raw[0].isalpha():
+        return None
+    has_sep = len(raw) >= 3 and raw[2] in ("\\", "/")
+    relative = raw[3:] if has_sep else raw[2:]
+    return canonical_volume_label(raw[0].upper(), aliases), relative.lstrip("\\/") or None
+
+
 def derive_legacy_identity(file_path: str | Path, aliases: dict[str, str] | None = None) -> tuple[str | None, str | None]:
     """Infer logical volume + relative path from legacy absolute file_path."""
     raw = str(file_path)
     path = Path(raw)
 
-    if len(raw) >= 2 and raw[1] == ":" and raw[0].isalpha():
-        root = Path(raw[:3] if len(raw) >= 3 and raw[2] in ("\\", "/") else f"{raw[:2]}\\")
-        relative = raw[3:] if len(raw) >= 3 and raw[2] in ("\\", "/") else raw[2:]
-        relative = relative.lstrip("\\/")
-        return canonical_volume_label(raw[0].upper(), aliases), relative or None
+    win_result = _parse_windows_drive(raw, aliases)
+    if win_result is not None:
+        return win_result
 
     if path.drive:
         root = Path(f"{path.drive}\\")

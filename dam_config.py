@@ -20,15 +20,21 @@ DEFAULTS = {
     "dam_root": str(Path.home() / "Documents" / "dam"),
     "db_path": None,  # derived: dam_root/dam.db
     "thumb_dir": None,  # derived: dam_root/thumbs
-    "dest_root": "/Volumes/kuvia2",
-    "default_volumes": ["/Volumes/Kuvia1", "/Volumes/kuvia2"],
-    "volume_aliases": {},
+    "dest_root": "/Volumes/Photos1",
+    "default_volumes": ["/Volumes/Photos1", "/Volumes/Photos2"],
+    "volume_aliases": {
+        "kuvia1": "Archive 1",
+        "Kuvia1": "Archive 1",
+        "Photos1": "Archive 1",
+        "kuvia2": "Archive 2",
+        "Photos2": "Archive 2",
+    },
     "ignore_volumes": [
         "Macintosh HD",
         "Macintosh HD - Data",
         "Preboot",
         "Recovery",
-        "Kuvia1",
+        "kuvia1",
         "kuvia2",
         "Arkisto",
         "Kaikki kata",
@@ -51,6 +57,7 @@ DEFAULTS = {
     "batch_size": 100,
     "burst_gap_seconds": 2.0,
     "burst_min_size": 3,
+    "tagger_workers": 6,
     "port": 5000,
     "gunicorn_workers": 4,
     "page_size": 50,
@@ -135,6 +142,7 @@ THUMB_WORKERS = _cfg["thumb_workers"]
 BATCH_SIZE = _cfg["batch_size"]
 BURST_GAP_SECONDS = _cfg["burst_gap_seconds"]
 BURST_MIN_SIZE = _cfg["burst_min_size"]
+TAGGER_WORKERS = _cfg.get("tagger_workers", 6)
 
 PORT = _cfg["port"]
 GUNICORN_WORKERS = _cfg["gunicorn_workers"]

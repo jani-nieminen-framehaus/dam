@@ -10,8 +10,11 @@ Usage:
     python3 dam_scanner.py --stats             # show DB stats and exit
     python3 dam_scanner.py --dry-run           # find files but don't write DB
 
-DB location: ~/Documents/dam/dam.db
+DB location: ~/.dam/dam.db
 Thumb cache: ~/Documents/dam/thumbs/
+
+Scan targets: /Volumes/Photos1, /Volumes/Photos2 (local SSDs)
+NAS volumes (kuvia1, kuvia2) are blacklisted — browse only, no script writes.
 
 Safety:
     - READ-ONLY on filesystem (never modifies image files or sidecars)
@@ -151,51 +154,35 @@ def discover_primary_files(volumes):
     return files
 
 
+def _has_sidecar(folder, candidates):
+    """Return True if any of the candidate filenames exist in folder."""
+    return any((folder / name).exists() for name in candidates)
+
+
 def detect_sidecars(primary_path):
     """Detect sidecar files belonging to the same image group."""
     folder = primary_path.parent
     stem = primary_path.stem
+    full_name = primary_path.name
 
-    sidecars = {
-        "has_jpeg": False,
-        "has_xmp": False,
-        "has_on1": False,
-        "has_radiant": False,
-        "sidecar_count": 0,
+    has_jpeg = (
+        primary_path.suffix.lower() in RAW_EXTENSIONS
+        and _has_sidecar(folder, [stem + ext for ext in (".JPG", ".jpg", ".JPEG", ".jpeg")])
+    )
+    has_xmp = _has_sidecar(folder, [stem + ".xmp", stem + ".XMP", full_name + ".xmp", full_name + ".XMP"])
+    has_on1 = _has_sidecar(folder, [stem + ".on1", full_name + ".on1"])
+    has_radiant = _has_sidecar(folder, [stem + ".radiant", full_name + ".radiant", stem + ".JPG.radiant", stem + ".jpg.radiant"])
+
+    sidecar_count = sum([has_jpeg, has_xmp, has_on1, has_radiant])
+
+    return {
+        "has_jpeg": has_jpeg,
+        "has_xmp": has_xmp,
+        "has_on1": has_on1,
+        "has_radiant": has_radiant,
+        "sidecar_count": sidecar_count,
+        "edited_anywhere": has_xmp or has_on1 or has_radiant,
     }
-
-    # Check for JPEG pair (only relevant if primary is RAW)
-    if primary_path.suffix.lower() in RAW_EXTENSIONS:
-        for jext in (".JPG", ".jpg", ".JPEG", ".jpeg"):
-            if (folder / (stem + jext)).exists():
-                sidecars["has_jpeg"] = True
-                sidecars["sidecar_count"] += 1
-                break
-
-    # Check for XMP: stem.xmp and stem.RW2.xmp variants
-    for xmp_name in [stem + ".xmp", stem + ".XMP", primary_path.name + ".xmp", primary_path.name + ".XMP"]:
-        if (folder / xmp_name).exists():
-            sidecars["has_xmp"] = True
-            sidecars["sidecar_count"] += 1
-            break
-
-    # Check for ON1 sidecar
-    for on1_name in [stem + ".on1", primary_path.name + ".on1"]:
-        if (folder / on1_name).exists():
-            sidecars["has_on1"] = True
-            sidecars["sidecar_count"] += 1
-            break
-
-    # Check for Radiant sidecar
-    for rad_name in [stem + ".radiant", primary_path.name + ".radiant", stem + ".JPG.radiant", stem + ".jpg.radiant"]:
-        if (folder / rad_name).exists():
-            sidecars["has_radiant"] = True
-            sidecars["sidecar_count"] += 1
-            break
-
-    sidecars["edited_anywhere"] = sidecars["has_xmp"] or sidecars["has_on1"] or sidecars["has_radiant"]
-
-    return sidecars
 
 
 def is_orphan_jpeg(primary_path):
@@ -753,67 +740,44 @@ def show_stats(conn):
         print(f"  {row[0]}: {row[1]:,}")
 
 
-def scan(volumes, rescan=False, dry_run=False, extract_thumbs=True):
-    """Main scan entry point."""
-    conn = init_db()
-
-    print("=" * 60)
-    print("DAM Scanner — Phase 1")
-    print(f"DB: {DB_PATH}")
-    print(f"Volumes: {', '.join(str(v) for v in volumes)}")
-    print(f"Mode: {'DRY RUN' if dry_run else 'RESCAN' if rescan else 'INCREMENTAL'}")
-    print("=" * 60)
-
-    # Step 1: Discover files
+def _discover_and_filter(volumes):
+    """Step 1: Discover primary files and filter out JPEG sidecars."""
     print("\n[1/4] Discovering primary files...")
     all_files = discover_primary_files(volumes)
     print(f"  Total primary files: {len(all_files):,}")
 
     if not all_files:
-        print("Nothing to scan.")
-        conn.close()
-        return
+        return []
 
-    # Step 1b: Filter out JPEGs that have RAW siblings (they're sidecars, not primaries)
     before_filter = len(all_files)
     all_files = [f for f in all_files if f.suffix.lower() not in JPEG_EXTENSIONS or is_orphan_jpeg(f)]
     jpeg_sidecars = before_filter - len(all_files)
     if jpeg_sidecars:
         print(f"  Filtered {jpeg_sidecars:,} JPEG sidecars (have RAW siblings)")
     print(f"  Indexable primaries: {len(all_files):,}")
+    return all_files
 
-    # Step 2: Filter already-indexed (unless rescan)
+
+def _filter_indexed(conn, all_files, volumes, rescan):
+    """Step 2: Filter out already-indexed files (unless rescan)."""
     if rescan:
-        to_scan = all_files
-        print(f"\n[2/4] Rescan mode — processing all {len(to_scan):,} files")
-    else:
-        indexed = get_indexed_identities(conn)
-        to_scan = [f for f in all_files if file_identity(f, volumes) not in indexed]
-        print(f"\n[2/4] Already indexed: {len(indexed):,}, new: {len(to_scan):,}")
+        print(f"\n[2/4] Rescan mode — processing all {len(all_files):,} files")
+        return all_files
+    indexed = get_indexed_identities(conn)
+    to_scan = [f for f in all_files if file_identity(f, volumes) not in indexed]
+    print(f"\n[2/4] Already indexed: {len(indexed):,}, new: {len(to_scan):,}")
+    return to_scan
 
-    if not to_scan:
-        print("Everything is already indexed. Use --rescan to force.")
-        show_stats(conn)
-        conn.close()
-        return
 
-    if dry_run:
-        print(f"\n[DRY RUN] Would process {len(to_scan):,} files. Exiting.")
-        conn.close()
-        return
-
-    # Step 3: Process in batches
+def _index_batches(conn, to_scan, volumes):
+    """Step 3: Extract EXIF and index files in batches."""
     print(f"\n[3/4] Extracting EXIF and indexing ({BATCH_SIZE} files/batch)...")
     start_time = time.time()
     processed = 0
     errors = 0
-    batch_num = 0
 
-    for i in range(0, len(to_scan), BATCH_SIZE):
+    for batch_num, i in enumerate(range(0, len(to_scan), BATCH_SIZE), 1):
         batch = to_scan[i : i + BATCH_SIZE]
-        batch_num += 1
-
-        # Batch exiftool call
         exif_data = extract_exif_batch(batch)
 
         for fpath in batch:
@@ -830,7 +794,6 @@ def scan(volumes, rescan=False, dry_run=False, extract_thumbs=True):
 
         conn.commit()
 
-        # Progress report every 10 batches
         if batch_num % 10 == 0:
             elapsed = time.time() - start_time
             rate = processed / elapsed if elapsed > 0 else 0
@@ -838,14 +801,43 @@ def scan(volumes, rescan=False, dry_run=False, extract_thumbs=True):
             print(f"  [{processed:,}/{len(to_scan):,}] {rate:.0f} files/sec, ~{remaining:.0f}s remaining")
 
     elapsed = time.time() - start_time
-
     print(f"\n  Done: {processed:,} indexed, {errors:,} errors in {elapsed:.1f}s")
 
-    # Step 4: Thumbnail extraction
+
+def scan(volumes, rescan=False, dry_run=False, extract_thumbs=True):
+    """Main scan entry point."""
+    conn = init_db()
+
+    print("=" * 60)
+    print("DAM Scanner — Phase 1")
+    print(f"DB: {DB_PATH}")
+    print(f"Volumes: {', '.join(str(v) for v in volumes)}")
+    print(f"Mode: {'DRY RUN' if dry_run else 'RESCAN' if rescan else 'INCREMENTAL'}")
+    print("=" * 60)
+
+    all_files = _discover_and_filter(volumes)
+    if not all_files:
+        print("Nothing to scan.")
+        conn.close()
+        return
+
+    to_scan = _filter_indexed(conn, all_files, volumes, rescan)
+    if not to_scan:
+        print("Everything is already indexed. Use --rescan to force.")
+        show_stats(conn)
+        conn.close()
+        return
+
+    if dry_run:
+        print(f"\n[DRY RUN] Would process {len(to_scan):,} files. Exiting.")
+        conn.close()
+        return
+
+    _index_batches(conn, to_scan, volumes)
+
     if extract_thumbs:
         _run_thumbnail_pass(conn)
 
-    # Show final stats
     show_stats(conn)
     conn.close()
 

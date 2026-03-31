@@ -1,7 +1,7 @@
 #!/opt/homebrew/bin/python3
 """
 Card Ingest Script — moves RAW+JPEG files from memory card to dated folders.
-Target: /Volumes/kuvia2/YYYY-MM-DD/
+Target: /Volumes/Photos1/YYYY-MM-DD/ (fallback: Photos2)
 Source: any mounted card (auto-detects /Volumes/XXXXX/DCIM/)
 
 Usage:
@@ -127,27 +127,62 @@ def collect_files(card_path):
     return files
 
 
-def ingest(card_path, dry_run=False):
-    """Main ingest: copy files from card to dated folders on kuvia2."""
-    progress_file = INGEST_STATUS_FILE
-    dest_root = choose_ingest_destination(DEST_ROOT, IGNORE_VOLUMES, VOLUME_ALIASES)
+def _update_ingest_status(progress_file, status, current=0, total=0):
+    """Write ingest progress to status file (non-fatal on error)."""
+    try:
+        with open(progress_file, "w") as f:
+            json.dump(
+                {"status": status, "current": current, "total": total, "timestamp": datetime.now().isoformat()}, f
+            )
+    except Exception:
+        pass
 
-    def update_status(status, current=0, total=0):
-        if dry_run:
-            return
-        try:
-            with open(progress_file, "w") as f:
-                json.dump(
-                    {"status": status, "current": current, "total": total, "timestamp": datetime.now().isoformat()}, f
-                )
-        except Exception:
-            pass
 
-    update_status("scanning", 0, 0)
+def _copy_verified(fpath, dest_file, fname, dry_run):
+    """Copy a single file with checksum verification.
+    Returns: ('copied', date_rel_path) | ('skipped', date_rel_path) | ('error', None)
+    """
+    if dest_file.exists():
+        print(f"  SKIP (exists): {fname}")
+        return "skipped"
 
+    if dry_run:
+        size_mb = fpath.stat().st_size / (1024 * 1024)
+        print(f"  WOULD COPY: {fname} ({size_mb:.1f} MB)")
+        return "copied"
+
+    try:
+        src_hash = copy_file_with_md5(fpath, dest_file)
+        dst_hash = md5_file(dest_file)
+        if src_hash != dst_hash:
+            print(f"  CHECKSUM FAIL: {fname} — removing bad copy!")
+            dest_file.unlink()
+            return "error"
+        return "copied"
+    except Exception as e:
+        msg = f"  ERROR: {fname} — {e}"
+        if tqdm:
+            tqdm.write(msg)
+        else:
+            print(msg)
+        return "error"
+
+
+def _ensure_dir(dest_dir, progress_file):
+    """Create destination directory, exit on permission error."""
+    try:
+        dest_dir.mkdir(parents=True, exist_ok=True)
+    except PermissionError:
+        print(f"ERROR: Cannot create destination folder: {dest_dir} (permission denied)")
+        _update_ingest_status(progress_file, "error")
+        sys.exit(1)
+
+
+def _validate_dest(dest_root, dry_run, progress_file):
+    """Validate destination root is writable. Exits on failure."""
     if dest_root is None:
         print(f"ERROR: No writable local archive volume detected. Preferred archive: {DEST_ROOT}")
-        update_status("error")
+        _update_ingest_status(progress_file, "error")
         sys.exit(1)
     if not dry_run:
         probe = dest_root / ".dam_write_probe"
@@ -156,8 +191,60 @@ def ingest(card_path, dry_run=False):
             probe.rmdir()
         except PermissionError:
             print(f"ERROR: Destination {dest_root} is mounted but not writable by current user.")
-            update_status("error")
+            _update_ingest_status(progress_file, "error")
             sys.exit(1)
+
+
+def _copy_date_group(date, date_files, dest_root, dry_run, progress_file, total, counters):
+    """Copy all files for one date folder, updating counters in place. Returns manifest entries."""
+    dest_dir = dest_root / str(date)
+    manifest = []
+
+    if dry_run or not tqdm:
+        print(f"\n[{date}] — {len(date_files)} files")
+
+    if not dry_run:
+        _ensure_dir(dest_dir, progress_file)
+
+    iterator = tqdm(date_files, desc=f"[{date}]", unit="file", leave=True) if (not dry_run and tqdm) else date_files
+
+    for fpath, fname in iterator:
+        if not dry_run:
+            _update_ingest_status(progress_file, "copying", sum(counters.values()), total)
+
+        result = _copy_verified(fpath, dest_dir / str(fname), fname, dry_run)
+        counters[result] += 1
+        if result != "error":
+            manifest.append(f"{date}/{fname}")
+
+    return manifest
+
+
+def _write_manifest(dest_root, manifest_paths):
+    """Write ingest manifest for downstream tagging."""
+    try:
+        with open(LAST_INGEST_FILE, "w") as f:
+            json.dump(
+                {
+                    "volume": logical_volume_for_root(dest_root, VOLUME_ALIASES),
+                    "dest_root": str(dest_root),
+                    "relative_paths": sorted(set(manifest_paths)),
+                    "timestamp": datetime.now().isoformat(),
+                },
+                f,
+            )
+    except OSError:
+        pass
+
+
+def ingest(card_path, dry_run=False):
+    """Main ingest: copy files from card to dated folders on kuvia2."""
+    progress_file = INGEST_STATUS_FILE
+    dest_root = choose_ingest_destination(DEST_ROOT, IGNORE_VOLUMES, VOLUME_ALIASES)
+
+    _validate_dest(dest_root, dry_run, progress_file)
+    if not dry_run:
+        _update_ingest_status(progress_file, "scanning", 0, 0)
 
     print(f"Source: {card_path}")
     print(f"Destination: {dest_root}")
@@ -167,106 +254,34 @@ def ingest(card_path, dry_run=False):
     files = collect_files(card_path)
     if not files:
         print("No image files found on card.")
-        update_status("idle")
+        if not dry_run:
+            _update_ingest_status(progress_file, "idle")
         return
 
-    # Group by date
     by_date: dict[str, list[tuple[Path, str]]] = {}
     for fpath, date, fname in files:
-        if date not in by_date:
-            by_date[date] = []
-        by_date[date].append((fpath, fname))
+        by_date.setdefault(date, []).append((fpath, fname))
 
     total = len(files)
-    copied = 0
-    skipped = 0
-    errors = 0
+    counters = {"copied": 0, "skipped": 0, "error": 0}
     manifest_paths: list[str] = []
 
     for date in sorted(by_date.keys()):
-        date_files = by_date[date]
-        dest_dir = dest_root / str(date)
+        manifest_paths.extend(
+            _copy_date_group(date, by_date[date], dest_root, dry_run, progress_file, total, counters)
+        )
 
-        # Don't print header if we have tqdm
-        if dry_run or not tqdm:
-            print(f"\n[{date}] — {len(date_files)} files")
-
-        if not dry_run:
-            try:
-                dest_dir.mkdir(parents=True, exist_ok=True)
-            except PermissionError:
-                print(f"ERROR: Cannot create destination folder: {dest_dir} (permission denied)")
-                update_status("error")
-                sys.exit(1)
-
-        iterator = date_files
-        if not dry_run and tqdm:
-            # Create a progress bar per date folder
-            iterator = tqdm(date_files, desc=f"[{date}]", unit="file", leave=True)
-
-        for fpath, fname in iterator:
-            current_progress = int(copied + skipped + errors)
-            update_status("copying", current_progress, total)
-            dest_file = dest_dir / str(fname)
-
-            # HARD STOP on collision — never overwrite, never rename
-            if dest_file.exists():
-                print(f"  SKIP (exists): {fname}")
-                manifest_paths.append(f"{date}/{fname}")
-                skipped += 1
-                continue
-
-            if dry_run:
-                size_mb = fpath.stat().st_size / (1024 * 1024)
-                print(f"  WOULD COPY: {fname} ({size_mb:.1f} MB)")
-                copied += 1
-            else:
-                try:
-                    src_hash = copy_file_with_md5(fpath, dest_file)
-                    # Verify checksum end-to-end against the written destination file.
-                    dst_hash = md5_file(dest_file)
-                    if src_hash != dst_hash:
-                        print(f"  CHECKSUM FAIL: {fname} — removing bad copy!")
-                        dest_file.unlink()
-                        errors += 1
-                    else:
-                        size_mb = fpath.stat().st_size / (1024 * 1024)
-                        # Replace print with tqdm.write if available so it doesn't break the progress bar layout
-                        msg = f"  OK: {fname} ({size_mb:.1f} MB) ✓"
-                        if not tqdm:
-                            print(msg)
-                        manifest_paths.append(f"{date}/{fname}")
-                        copied += 1
-                except Exception as e:
-                    msg = f"  ERROR: {fname} — {e}"
-                    if tqdm:
-                        tqdm.write(msg)
-                    else:
-                        print(msg)
-                    errors += 1
-
-    update_status("idle", total, total)
-    if not dry_run and manifest_paths:
-        try:
-            with open(LAST_INGEST_FILE, "w") as f:
-                json.dump(
-                    {
-                        "volume": logical_volume_for_root(dest_root, VOLUME_ALIASES),
-                        "dest_root": str(dest_root),
-                        "relative_paths": sorted(set(manifest_paths)),
-                        "timestamp": datetime.now().isoformat(),
-                    },
-                    f,
-                )
-        except OSError:
-            pass
+    if not dry_run:
+        _update_ingest_status(progress_file, "idle", total, total)
+        if manifest_paths:
+            _write_manifest(dest_root, manifest_paths)
 
     print(f"\n{'=' * 50}")
     print(f"Total files found: {total}")
-    print(f"Copied: {copied}")
-    print(f"Skipped (existing): {skipped}")
-    print(f"Errors: {errors}")
-    if not dry_run and errors == 0:
+    print(f"Copied: {counters['copied']}")
+    print(f"Skipped (existing): {counters['skipped']}")
+    print(f"Errors: {counters['error']}")
+    if not dry_run and counters["error"] == 0:
         print("\nAll files verified. Format card in-camera when ready.")
 
 

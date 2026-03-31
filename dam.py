@@ -128,142 +128,121 @@ def cmd_search(args):
     sys.exit(run(search_cmd, "Semantic Search"))
 
 
-def cmd_serve(args):
-    """Start the web API (and SPA). Prefers gunicorn; falls back to Flask dev server."""
-    port = str(PORT)
+def _parse_port(args):
+    """Extract port from args, defaulting to configured PORT."""
     for i, a in enumerate(args):
         if a in ("-p", "--port") and i + 1 < len(args):
-            port = args[i + 1]
-            break
+            return args[i + 1]
         if a.startswith("--port="):
-            port = a.split("=", 1)[1]
-            break
-    env = os.environ.copy()
-    env["PYTHONPATH"] = str(DAM_ROOT)
-    api_module = "dam_api"
-    bind = f"0.0.0.0:{port}"
-    try:
-        import gunicorn
-    except ModuleNotFoundError:
-        gunicorn = None
+            return a.split("=", 1)[1]
+    return str(PORT)
 
-    if gunicorn is not None and "--window" not in args:
-        print("DAM ── Web server (gunicorn)\n" + "-" * 50)
-        if getattr(sys, "frozen", False):
-            # When frozen, sys.executable is this DAM binary, not python; run gunicorn in-process.
-            try:
-                from gunicorn.app.base import BaseApplication
 
-                sys.path.insert(0, str(DAM_ROOT))
-                from dam_api import app as flask_app
-
-                class _GunicornApp(BaseApplication):
-                    def __init__(self, app, options=None):
-                        self._app = app
-                        self._options = options or {}
-                        super().__init__()
-
-                    def load_config(self):
-                        for k, v in self._options.items():
-                            if k in self.cfg.settings and v is not None:
-                                self.cfg.set(k.lower(), v)
-
-                    def load(self):
-                        return self._app
-
-                options = {
-                    "bind": bind,
-                    "workers": GUNICORN_WORKERS,
-                    "accesslog": "-",
-                    "errorlog": "-",
-                }
-                _GunicornApp(flask_app, options).run()
-                return
-            except Exception as e:
-                print(f"Gunicorn failed to start: {e}")
-                sys.exit(1)
-
-        rc = subprocess.run(
-            [sys.executable, "-m", "gunicorn", "-w", str(GUNICORN_WORKERS), "-b", bind, f"{api_module}:app"],
-            cwd=str(DAM_ROOT),
-            env=env,
-        ).returncode
-        sys.exit(rc)
-
-    use_window = "--window" in args
-
-    if use_window:
-        print("DAM ── Desktop application\n" + "-" * 50)
-        import socket
-        import threading
-        import time
-
+def _serve_gunicorn(bind, env):
+    """Start gunicorn — in-process when frozen, subprocess otherwise."""
+    print("DAM ── Web server (gunicorn)\n" + "-" * 50)
+    if getattr(sys, "frozen", False):
         try:
-            import webview
-        except ImportError:
-            print("ERROR: pywebview is not installed.")
-            print("Install it: pip install pywebview")
+            from gunicorn.app.base import BaseApplication
+
+            sys.path.insert(0, str(DAM_ROOT))
+            from dam_api import app as flask_app
+
+            class _GunicornApp(BaseApplication):
+                def __init__(self, app, options=None):
+                    self._app = app
+                    self._options = options or {}
+                    super().__init__()
+
+                def load_config(self):
+                    for k, v in self._options.items():
+                        if k in self.cfg.settings and v is not None:
+                            self.cfg.set(k.lower(), v)
+
+                def load(self):
+                    return self._app
+
+            _GunicornApp(flask_app, {"bind": bind, "workers": GUNICORN_WORKERS, "accesslog": "-", "errorlog": "-"}).run()
+            return
+        except Exception as e:
+            print(f"Gunicorn failed to start: {e}")
             sys.exit(1)
 
-        from dam_api import app as flask_app
+    rc = subprocess.run(
+        [sys.executable, "-m", "gunicorn", "-w", str(GUNICORN_WORKERS), "-b", bind, "dam_api:app"],
+        cwd=str(DAM_ROOT),
+        env=env,
+    ).returncode
+    sys.exit(rc)
 
-        # Pick a free port if the default is busy
-        int_port = int(port)
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-            if s.connect_ex(("127.0.0.1", int_port)) == 0:
-                # Port is taken — find a free one
-                with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s2:
-                    s2.bind(("127.0.0.1", 0))
-                    int_port = s2.getsockname()[1]
-                print(f"  Port {port} busy, using {int_port}")
 
-        server_ready = threading.Event()
+def _serve_window(port):
+    """Start Flask in a thread and open a pywebview window."""
+    print("DAM ── Desktop application\n" + "-" * 50)
+    import socket
+    import threading
+    import time
 
-        def start_server():
-            # Signal ready once the first request can be served
-            import werkzeug.serving
+    try:
+        import webview
+    except ImportError:
+        print("ERROR: pywebview is not installed.")
+        print("Install it: pip install pywebview")
+        sys.exit(1)
 
-            original_inner = werkzeug.serving.make_server
+    from dam_api import app as flask_app
 
-            def patched_make_server(*a, **kw):
-                srv = original_inner(*a, **kw)
-                server_ready.set()
-                return srv
+    int_port = int(port)
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        if s.connect_ex(("127.0.0.1", int_port)) == 0:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s2:
+                s2.bind(("127.0.0.1", 0))
+                int_port = s2.getsockname()[1]
+            print(f"  Port {port} busy, using {int_port}")
 
-            werkzeug.serving.make_server = patched_make_server
-            flask_app.run(host="127.0.0.1", port=int_port, debug=False, use_reloader=False)
+    server_ready = threading.Event()
 
-        t = threading.Thread(target=start_server, daemon=True)
-        t.start()
+    def start_server():
+        import werkzeug.serving
 
-        # Wait for server to actually bind (up to 5s)
-        if not server_ready.wait(timeout=5.0):
-            # Fallback: just give it a bit more time
-            time.sleep(0.5)
+        original_inner = werkzeug.serving.make_server
 
-        url = f"http://127.0.0.1:{int_port}"
-        print(f"  Server: {url}")
-        print(f"  Window: {WINDOW_SIZE[0]}x{WINDOW_SIZE[1]}")
+        def patched_make_server(*a, **kw):
+            srv = original_inner(*a, **kw)
+            server_ready.set()
+            return srv
 
-        webview.create_window("DAM", url, width=WINDOW_SIZE[0], height=WINDOW_SIZE[1])
+        werkzeug.serving.make_server = patched_make_server
+        flask_app.run(host="127.0.0.1", port=int_port, debug=False, use_reloader=False)
 
-        # Fix macOS Dock showing "Python" instead of "DAM"
-        import platform
+    threading.Thread(target=start_server, daemon=True).start()
+    if not server_ready.wait(timeout=5.0):
+        time.sleep(0.5)
 
-        if platform.system() == "Darwin":
-            try:
-                from Foundation import NSBundle
+    url = f"http://127.0.0.1:{int_port}"
+    print(f"  Server: {url}")
+    print(f"  Window: {WINDOW_SIZE[0]}x{WINDOW_SIZE[1]}")
 
-                bundle = NSBundle.mainBundle()
-                info = bundle.localizedInfoDictionary() or bundle.infoDictionary()
-                if info:
-                    info["CFBundleName"] = "DAM"
-            except ImportError:
-                pass  # PyObjC not available — Dock will show "Python"
+    webview.create_window("DAM", url, width=WINDOW_SIZE[0], height=WINDOW_SIZE[1])
 
-        webview.start()
-        return
+    import platform
 
+    if platform.system() == "Darwin":
+        try:
+            from Foundation import NSBundle
+
+            bundle = NSBundle.mainBundle()
+            info = bundle.localizedInfoDictionary() or bundle.infoDictionary()
+            if info:
+                info["CFBundleName"] = "DAM"
+        except ImportError:
+            pass
+
+    webview.start()
+
+
+def _serve_flask_dev(port, env):
+    """Start Flask dev server (fallback when gunicorn unavailable)."""
     print("DAM ── Web server (Flask dev)\n" + "-" * 50)
     print("Install gunicorn for production: pip install gunicorn")
 
@@ -283,161 +262,163 @@ def cmd_serve(args):
     )
 
 
-def cmd_export(args):
-    """Export picked/rated images to a destination folder."""
-    import shutil
-    import sqlite3
+def cmd_serve(args):
+    """Start the web API (and SPA). Prefers gunicorn; falls back to Flask dev server."""
+    port = _parse_port(args)
+    env = os.environ.copy()
+    env["PYTHONPATH"] = str(DAM_ROOT)
 
-    dest = None
-    rating_min = None
-    pick = None
-    edit_status = None
-    fmt = "both"
-    dry_run = "--dry-run" in args
+    try:
+        import gunicorn  # noqa: F401
+        has_gunicorn = True
+    except ModuleNotFoundError:
+        has_gunicorn = False
 
+    if "--window" in args:
+        _serve_window(port)
+    elif has_gunicorn:
+        _serve_gunicorn(f"0.0.0.0:{port}", env)
+    else:
+        _serve_flask_dev(port, env)
+
+
+def _parse_export_args(args):
+    """Parse export CLI arguments into a dict."""
+    opts = {"dest": None, "rating_min": None, "pick": None, "edit_status": None, "format": "both", "dry_run": "--dry-run" in args}
+    valued_flags = {"--dest": "dest", "--rating": "rating_min", "--pick": "pick", "--edit-status": "edit_status", "--format": "format"}
     i = 0
     while i < len(args):
-        a = args[i]
-        if a == "--dest" and i + 1 < len(args):
-            dest = args[i + 1]
+        flag = valued_flags.get(args[i])
+        if flag and i + 1 < len(args):
+            opts[flag] = int(args[i + 1]) if flag == "rating_min" else args[i + 1]
             i += 2
-        elif a == "--rating" and i + 1 < len(args):
-            rating_min = int(args[i + 1])
-            i += 2
-        elif a == "--pick" and i + 1 < len(args):
-            pick = args[i + 1]
-            i += 2
-        elif a == "--edit-status" and i + 1 < len(args):
-            edit_status = args[i + 1]
-            i += 2
-        elif a == "--format" and i + 1 < len(args):
-            fmt = args[i + 1]
-            i += 2
-        elif a == "--dry-run":
-            i += 1
         else:
             i += 1
+    return opts
 
-    if not dest:
+
+def _find_jpeg_sidecar(raw_path):
+    """Derive JPEG sidecar path from RAW path."""
+    p = Path(raw_path)
+    for ext in (".JPG", ".jpg", ".JPEG", ".jpeg"):
+        candidate = p.with_suffix(ext)
+        if candidate.exists():
+            return candidate
+    return None
+
+
+def _select_export_files(file_path, row, want_raw, want_jpeg):
+    """Determine which files to export for a given image row."""
+    files = []
+    if row["orphan_jpeg"]:
+        if want_jpeg:
+            files.append(file_path)
+    else:
+        if want_raw:
+            files.append(file_path)
+        if want_jpeg and row["has_jpeg"]:
+            jpeg = _find_jpeg_sidecar(file_path)
+            if jpeg:
+                files.append(jpeg)
+    return files
+
+
+def _export_file(src, dest_dir, dry_run, counters):
+    """Copy a single file to dest_dir, updating counters dict in place."""
+    import shutil
+
+    src = Path(src)
+    if not src.exists():
+        counters["missing"] += 1
+        if dry_run:
+            print(f"  SKIP (not mounted): {src.name}")
+        return
+    target = dest_dir / src.name
+    if target.exists():
+        counters["exists"] += 1
+        return
+    size = src.stat().st_size
+    if dry_run:
+        print(f"  WOULD COPY: {src.name} ({size / (1024 * 1024):.1f} MB)")
+    else:
+        shutil.copy2(str(src), str(target))
+    counters["exported"] += 1
+    counters["bytes"] += size
+
+
+def _validate_export_opts(opts):
+    """Validate export options, exit on error. Returns (dest, fmt, dry_run)."""
+    if not opts["dest"]:
         print("ERROR: --dest is required")
         print("Usage: dam export --dest ~/Export [--rating N] [--pick yes] [--format raw|jpeg|both] [--dry-run]")
         sys.exit(1)
-
+    fmt = opts["format"]
     if fmt not in ("raw", "jpeg", "both"):
         print(f"ERROR: --format must be raw, jpeg, or both (got: {fmt})")
         sys.exit(1)
+    return Path(opts["dest"]).expanduser().resolve(), fmt, opts["dry_run"]
 
-    dest = Path(dest).expanduser().resolve()
-    if not dry_run:
-        dest.mkdir(parents=True, exist_ok=True)
 
-    # Build query
+def _query_export_rows(opts):
+    """Query DB for images matching export filters."""
+    import sqlite3
+
     clauses, params = [], []
-    if rating_min is not None:
-        clauses.append("rating >= ?")
-        params.append(rating_min)
-    if pick:
-        clauses.append("pick = ?")
-        params.append(pick)
-    if edit_status:
-        clauses.append("edit_status = ?")
-        params.append(edit_status)
+    for field, col in [("rating_min", "rating >= ?"), ("pick", "pick = ?"), ("edit_status", "edit_status = ?")]:
+        if opts[field] is not None:
+            clauses.append(col)
+            params.append(opts[field])
 
     where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
-    sql = (
-        "SELECT id, file_path, file_name, volume, relative_path, date_folder, has_jpeg, orphan_jpeg "
-        f"FROM images {where} ORDER BY date_taken DESC"
-    )
+    sql = f"SELECT id, file_path, file_name, volume, relative_path, date_folder, has_jpeg, orphan_jpeg FROM images {where} ORDER BY date_taken DESC"
 
     conn = sqlite3.connect(str(DB_PATH))
     conn.row_factory = sqlite3.Row
     rows = conn.execute(sql, params).fetchall()
     conn.close()
+    return rows
 
+
+def cmd_export(args):
+    """Export picked/rated images to a destination folder."""
+    opts = _parse_export_args(args)
+    dest, fmt, dry_run = _validate_export_opts(opts)
+    if not dry_run:
+        dest.mkdir(parents=True, exist_ok=True)
+
+    rows = _query_export_rows(opts)
     if not rows:
         print("No images match the given filters.")
         return
 
-    exported = 0
-    skipped_exists = 0
-    skipped_missing = 0
-    total_bytes = 0
-
-    def _jpeg_path_for(raw_path):
-        """Derive JPEG sidecar path from RAW path."""
-        p = Path(raw_path)
-        for ext in (".JPG", ".jpg", ".JPEG", ".jpeg"):
-            candidate = p.with_suffix(ext)
-            if candidate.exists():
-                return candidate
-        return None
-
-    def _copy_file(src, dest_dir, dry_run):
-        nonlocal exported, skipped_exists, skipped_missing, total_bytes
-        src = Path(src)
-        if not src.exists():
-            skipped_missing += 1
-            if dry_run:
-                print(f"  SKIP (not mounted): {src.name}")
-            return
-        target = dest_dir / src.name
-        if target.exists():
-            skipped_exists += 1
-            return
-        size = src.stat().st_size
-        if dry_run:
-            print(f"  WOULD COPY: {src.name} ({size / (1024 * 1024):.1f} MB)")
-        else:
-            shutil.copy2(str(src), str(target))
-        exported += 1
-        total_bytes += size
-
-    mode = "DRY RUN" if dry_run else "EXPORT"
-    print(f"DAM Export — {mode}")
+    print(f"DAM Export — {'DRY RUN' if dry_run else 'EXPORT'}")
     print(f"Destination: {dest}")
     print(f"Format: {fmt}")
-    if rating_min:
-        print(f"Rating >= {rating_min}")
-    if pick:
-        print(f"Pick = {pick}")
-    if edit_status:
-        print(f"Edit status = {edit_status}")
     print(f"Matching images: {len(rows)}")
     print("-" * 50)
+
+    counters = {"exported": 0, "exists": 0, "missing": 0, "bytes": 0}
+    want_raw = fmt in ("raw", "both")
+    want_jpeg = fmt in ("jpeg", "both")
 
     for row in rows:
         resolved = resolve_archive_file(
             row["file_path"], row["volume"], row["relative_path"], DEFAULT_VOLUMES, IGNORE_VOLUMES, VOLUME_ALIASES
         )
         file_path = str(resolved) if resolved else row["file_path"]
-        date_folder = row["date_folder"] or "undated"
-        is_orphan = row["orphan_jpeg"]
-
-        date_dir = dest / date_folder
+        date_dir = dest / (row["date_folder"] or "undated")
         if not dry_run:
             date_dir.mkdir(parents=True, exist_ok=True)
 
-        if is_orphan:
-            # Primary file IS the JPEG
-            if fmt in ("jpeg", "both"):
-                _copy_file(file_path, date_dir, dry_run)
-            elif fmt == "raw":
-                pass  # orphan JPEG has no RAW
-        else:
-            # Primary file is RAW
-            if fmt in ("raw", "both"):
-                _copy_file(file_path, date_dir, dry_run)
-            if fmt in ("jpeg", "both") and row["has_jpeg"]:
-                jpeg = _jpeg_path_for(file_path)
-                if jpeg:
-                    _copy_file(jpeg, date_dir, dry_run)
+        for f in _select_export_files(file_path, row, want_raw, want_jpeg):
+            _export_file(f, date_dir, dry_run, counters)
 
     print(f"\n{'=' * 50}")
-    print(f"{'Would export' if dry_run else 'Exported'}: {exported} files ({total_bytes / (1024 * 1024):.1f} MB)")
-    if skipped_exists:
-        print(f"Skipped (already exists): {skipped_exists}")
-    if skipped_missing:
-        print(f"Skipped (volume not mounted): {skipped_missing}")
+    print(f"{'Would export' if dry_run else 'Exported'}: {counters['exported']} files ({counters['bytes'] / (1024 * 1024):.1f} MB)")
+    if counters["exists"]:
+        print(f"Skipped (already exists): {counters['exists']}")
+    if counters["missing"]:
+        print(f"Skipped (volume not mounted): {counters['missing']}")
 
 
 COMMANDS = {

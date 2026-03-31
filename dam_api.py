@@ -12,9 +12,9 @@ Endpoints:
     PATCH  /api/images/bulk                Bulk update multiple images
     DELETE /api/images/bulk                Bulk delete multiple images
     POST   /api/images/<id>/projects       Assign project
-    DELETE /api/images/<id>/projects/<n>   Remove project
+    DELETE /api/images/<id>/projects/<name>   Remove project
     POST   /api/images/<id>/subjects       Assign subject
-    DELETE /api/images/<id>/subjects/<n>   Remove subject
+    DELETE /api/images/<id>/subjects/<name>   Remove subject
     POST   /api/images/<id>/keywords       Add keyword
     DELETE /api/images/<id>/keywords/<kw>  Remove keyword
     GET    /api/search?q=...               Semantic search
@@ -76,44 +76,34 @@ def row_to_dict(row) -> dict[str, typing.Any]:
 
 # ── Validation ────────────────────────────────────────────────────────────────
 
-PATCHABLE = {
-    "rating",
-    "pick",
-    "edit_status",
-    "color_label",
-    "is_selkie",
-    "notes",
-    "triptych_leg",
-    "narrative_arc",
-    "location_type",
-}
 PICK_VALUES = {"pick", "reject", "unmarked"}
 EDIT_STATUS_VALUES = {"unculled", "rejected", "selected", "developed", "printed", "exhibited"}
 COLOR_VALUES = {"red", "yellow", "green", "blue", "purple", "none"}
 TRIPTYCH_VALUES = {"color_doc", "bw_portrait", "abstract", None}
 NARRATIVE_VALUES = {"beginning", "middle", "current", None}
 
+# (validator_fn, error_message) — validator returns True if value is acceptable
+FIELD_VALIDATORS = {
+    "rating": (lambda v: isinstance(v, int) and 0 <= v <= 5, "rating must be integer 0-5"),
+    "pick": (lambda v: v in PICK_VALUES, f"pick must be one of {PICK_VALUES}"),
+    "edit_status": (lambda v: v in EDIT_STATUS_VALUES, f"edit_status must be one of {EDIT_STATUS_VALUES}"),
+    "color_label": (lambda v: v in COLOR_VALUES, f"color_label must be one of {COLOR_VALUES}"),
+    "triptych_leg": (lambda v: v in TRIPTYCH_VALUES, f"triptych_leg must be one of {TRIPTYCH_VALUES}"),
+    "narrative_arc": (lambda v: v in NARRATIVE_VALUES, f"narrative_arc must be one of {NARRATIVE_VALUES}"),
+    "is_selkie": (lambda v: isinstance(v, bool), "is_selkie must be boolean"),
+    "notes": (lambda _: True, ""),
+    "location_type": (lambda _: True, ""),
+}
+
 
 def validate_patch(data):
     clean = {}
     for key, val in data.items():
-        if key not in PATCHABLE:
+        if key not in FIELD_VALIDATORS:
             return None, f"Field not patchable: {key}"
-        if key == "rating":
-            if not isinstance(val, int) or not (0 <= val <= 5):
-                return None, "rating must be integer 0-5"
-        elif key == "pick" and val not in PICK_VALUES:
-            return None, f"pick must be one of {PICK_VALUES}"
-        elif key == "edit_status" and val not in EDIT_STATUS_VALUES:
-            return None, f"edit_status must be one of {EDIT_STATUS_VALUES}"
-        elif key == "color_label" and val not in COLOR_VALUES:
-            return None, f"color_label must be one of {COLOR_VALUES}"
-        elif key == "triptych_leg" and val not in TRIPTYCH_VALUES:
-            return None, f"triptych_leg must be one of {TRIPTYCH_VALUES}"
-        elif key == "narrative_arc" and val not in NARRATIVE_VALUES:
-            return None, f"narrative_arc must be one of {NARRATIVE_VALUES}"
-        elif key == "is_selkie" and not isinstance(val, bool):
-            return None, "is_selkie must be boolean"
+        check, err_msg = FIELD_VALIDATORS[key]
+        if not check(val):
+            return None, err_msg
         clean[key] = val
     return clean, None
 
@@ -121,60 +111,49 @@ def validate_patch(data):
 # ── Filters ───────────────────────────────────────────────────────────────────
 
 
+_SIMPLE_FILTERS = [
+    ("camera", "i.camera_short = ?"),
+    ("volume", "i.volume = ?"),
+    ("pick", "i.pick = ?"),
+    ("edit_status", "i.edit_status = ?"),
+    ("triptych_leg", "i.triptych_leg = ?"),
+    ("color_label", "i.color_label = ?"),
+    ("narrative_arc", "i.narrative_arc = ?"),
+    ("location_type", "i.location_type = ?"),
+    ("date_from", "i.date_taken >= ?"),
+    ("date_to", "i.date_taken <= ?"),
+]
+
+_INT_FILTERS = [
+    ("rating_min", "i.rating >= ?"),
+    ("rating_max", "i.rating <= ?"),
+]
+
+_SUBQUERY_FILTERS = [
+    ("project", "i.id IN (SELECT ip.image_id FROM image_projects ip JOIN projects p ON ip.project_id = p.id WHERE p.name = ?)"),
+    ("subject", "i.id IN (SELECT isb.image_id FROM image_subjects isb JOIN subjects s ON isb.subject_id = s.id WHERE s.name = ?)"),
+]
+
+
 def build_filters(args):
     clauses, params = [], []
 
-    if v := args.get("camera"):
-        clauses.append("i.camera_short = ?")
-        params.append(v)
-    if v := args.get("volume"):
-        clauses.append("i.volume = ?")
-        params.append(v)
-    if v := args.get("rating_min"):
-        clauses.append("i.rating >= ?")
-        params.append(int(v))
-    if v := args.get("rating_max"):
-        clauses.append("i.rating <= ?")
-        params.append(int(v))
-    if v := args.get("pick"):
-        clauses.append("i.pick = ?")
-        params.append(v)
-    if v := args.get("edit_status"):
-        clauses.append("i.edit_status = ?")
-        params.append(v)
-    if v := args.get("triptych_leg"):
-        clauses.append("i.triptych_leg = ?")
-        params.append(v)
-    if v := args.get("color_label"):
-        clauses.append("i.color_label = ?")
-        params.append(v)
-    if v := args.get("narrative_arc"):
-        clauses.append("i.narrative_arc = ?")
-        params.append(v)
-    if v := args.get("location_type"):
-        clauses.append("i.location_type = ?")
-        params.append(v)
-    if v := args.get("project"):
-        clauses.append(
-            "i.id IN (SELECT ip.image_id FROM image_projects ip JOIN projects p ON ip.project_id = p.id WHERE p.name = ?)"
-        )
-        params.append(v)
-    if v := args.get("subject"):
-        clauses.append(
-            "i.id IN (SELECT isb.image_id FROM image_subjects isb JOIN subjects s ON isb.subject_id = s.id WHERE s.name = ?)"
-        )
-        params.append(v)
-    if v := args.get("date_from"):
-        clauses.append("i.date_taken >= ?")
-        params.append(v)
-    if v := args.get("date_to"):
-        clauses.append("i.date_taken <= ?")
-        params.append(v)
+    for param, clause in _SIMPLE_FILTERS:
+        if v := args.get(param):
+            clauses.append(clause)
+            params.append(v)
+    for param, clause in _INT_FILTERS:
+        if v := args.get(param):
+            clauses.append(clause)
+            params.append(int(v))
+    for param, clause in _SUBQUERY_FILTERS:
+        if v := args.get(param):
+            clauses.append(clause)
+            params.append(v)
     if v := args.get("is_selkie"):
         clauses.append("i.is_selkie = ?")
         params.append(1 if v.lower() == "true" else 0)
 
-    # Keyset cursor
     cursor_date = args.get("cursor_date")
     cursor_id = args.get("cursor_id")
     if cursor_date and cursor_id:
