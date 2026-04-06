@@ -162,6 +162,7 @@ CREATE INDEX IF NOT EXISTS idx_triptych_leg ON images(triptych_leg);
 CREATE INDEX IF NOT EXISTS idx_is_selkie ON images(is_selkie);
 CREATE INDEX IF NOT EXISTS idx_date_folder ON images(date_folder);
 CREATE INDEX IF NOT EXISTS idx_file_type ON images(file_type);
+CREATE INDEX IF NOT EXISTS idx_untagged ON images(id) WHERE ai_description IS NULL;
 
 -- Flat view: normalized tables collapsed to JSON arrays per image
 -- Flask queries this instead of writing multi-join queries manually
@@ -203,7 +204,13 @@ def init_db():
     dam_config.THUMB_DIR.mkdir(parents=True, exist_ok=True)
     conn = get_db()
     conn.executescript(SCHEMA_SQL)
-    _migrate_storage_identity(conn)
+
+    # Run migrations only once, gated by schema version
+    version = conn.execute("PRAGMA user_version").fetchone()[0]
+    if version < 1:
+        _migrate_storage_identity(conn)
+        conn.execute("PRAGMA user_version = 1")
+
     conn.commit()
     return conn
 

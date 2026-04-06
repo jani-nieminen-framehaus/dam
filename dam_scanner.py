@@ -34,6 +34,7 @@ from pathlib import Path
 
 from dam_config import BATCH_SIZE, DB_PATH, DEFAULT_VOLUMES, IGNORE_VOLUMES, THUMB_DIR, THUMB_WORKERS, VOLUME_ALIASES
 from dam_schema import init_db
+from dam_db import wal_checkpoint
 from storage_utils import (
     derive_legacy_identity,
     logical_volume_for_root,
@@ -57,6 +58,7 @@ CAMERA_SHORT_MAP = {
     "NIKON Z f": "Zf",
     "NIKON Z F": "Zf",
     "X-T30 II": "XT30II",
+    "X-T30 III": "XT30III",
     "X-T30": "XT30",
     "X-H2": "XH2",
     "X-Pro3": "XPro3",
@@ -72,6 +74,14 @@ CAMERA_SHORT_MAP = {
     "Canon EOS R3": "R3",
     "Canon EOS R": "R",
     "Canon PowerShot G7 X Mark III": "G7XIII",
+    "ILCE-7CM2": "A7CII",
+    "ILCE-7M4": "A7IV",
+    "X-T5": "XT5",
+    "X-S20": "XS20",
+    "X-M5": "XM5",
+    "RICOH GR IV": "GRIV",
+    "Canon EOS 700D": "700D",
+    "LEICA SL2": "SL2",
 }
 
 # Camera model → mount system
@@ -80,10 +90,19 @@ MOUNT_MAP = {
     "S1": "L-mount",
     "Zf": "Z-mount",
     "XT30II": "X-mount",
+    "XT30III": "X-mount",
     "XT30": "X-mount",
     "XH2": "X-mount",
     "XPro3": "X-mount",
     "A1": "E-mount",
+    "A7CII": "E-mount",
+    "A7IV": "E-mount",
+    "XT5": "X-mount",
+    "XS20": "X-mount",
+    "XM5": "X-mount",
+    "GRIV": "integrated",
+    "700D": "EF-mount",
+    "SL2": "L-mount",
     "GFX100II": "G-mount",
     "LX100II": "integrated",
     "G7XIII": "integrated",
@@ -279,10 +298,10 @@ def get_camera_short(model):
     # Try exact match first
     if model in CAMERA_SHORT_MAP:
         return CAMERA_SHORT_MAP[model]
-    # Try partial match (e.g., model string contains the key)
-    for key, short in CAMERA_SHORT_MAP.items():
+    # Try partial match — longest key first to avoid "X-T30 II" matching "X-T30 III"
+    for key in sorted(CAMERA_SHORT_MAP, key=len, reverse=True):
         if key in model:
-            return short
+            return CAMERA_SHORT_MAP[key]
     return model  # fallback: return original
 
 
@@ -840,6 +859,7 @@ def scan(volumes, rescan=False, dry_run=False, extract_thumbs=True):
 
     show_stats(conn)
     conn.close()
+    wal_checkpoint()  # Truncate WAL after bulk scan
 
 
 # ============================================================

@@ -24,7 +24,6 @@ Models required (must be in Ollama):
 
 import base64
 import json
-import struct
 import sys
 import time
 import urllib.error
@@ -49,7 +48,7 @@ from dam_config import (
     THUMB_DIR,
     VISION_MODEL,
 )
-from dam_db import get_db
+from dam_db import get_db, serialize_vector, wal_checkpoint
 
 # ── Prompts ────────────────────────────────────────────────────────────────────
 
@@ -202,9 +201,6 @@ def embed_text(text):
     return resp.get("embedding", [])
 
 
-def serialize_vector(floats):
-    """Pack float list to binary blob for sqlite-vec."""
-    return struct.pack(f"{len(floats)}f", *floats)
 
 
 # ── Burst detection ────────────────────────────────────────────────────────────
@@ -648,6 +644,7 @@ def tag_images(args):
     if tagged > 0:
         print(f"Average: {elapsed / tagged:.1f}s per representative image")
     conn.close()
+    wal_checkpoint()  # Truncate WAL after bulk writes
 
 
 # ── Semantic search ─────────────────────────────────────────────────────────────

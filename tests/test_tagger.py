@@ -119,33 +119,35 @@ def test_detect_bursts_below_min_size():
 
 
 def test_keyword_parsing_valid_json(monkeypatch):
-    """Valid JSON response is parsed correctly."""
+    """Comma-separated response is parsed correctly."""
     valid_response = {
-        "response": '{"factual": ["man", "window"], "mood": ["isolation"], "technical": ["backlit"], "triptych_relevant": true}'
+        "response": "man, window, isolation, backlit, aging"
     }
     monkeypatch.setattr("dam_tagger.ollama_post", lambda *a, **kw: valid_response)
 
     result = text_extract_keywords("A man stands by a window.")
-    assert result["factual"] == ["man", "window"]
-    assert result["mood"] == ["isolation"]
-    assert result["triptych_relevant"] is True
+    assert "man" in result["factual"]
+    assert "window" in result["factual"]
+    assert "isolation" in result["mood"]
+    assert result["triptych_relevant"] is True  # "aging" is in TRIPTYCH_THEMES
 
 
 def test_keyword_parsing_markdown_fences(monkeypatch):
-    """JSON wrapped in markdown fences is still parsed."""
-    fenced_response = {
-        "response": '```json\n{"factual": ["chair"], "mood": ["calm"], "technical": [], "triptych_relevant": false}\n```'
+    """Keywords with trailing noise are still parsed."""
+    noisy_response = {
+        "response": "chair, calm, soft lighting\nNote: these are approximate"
     }
-    monkeypatch.setattr("dam_tagger.ollama_post", lambda *a, **kw: fenced_response)
+    monkeypatch.setattr("dam_tagger.ollama_post", lambda *a, **kw: noisy_response)
 
     result = text_extract_keywords("A chair in a room.")
-    assert result["factual"] == ["chair"]
-    assert result["triptych_relevant"] is False
+    assert "chair" in result["factual"]
+    assert "calm" in result["mood"]
+    assert "soft lighting" in result["technical"]
 
 
 def test_keyword_parsing_malformed(monkeypatch):
-    """Malformed response returns safe defaults."""
-    monkeypatch.setattr("dam_tagger.ollama_post", lambda *a, **kw: {"response": "not json at all"})
+    """Empty response returns safe defaults."""
+    monkeypatch.setattr("dam_tagger.ollama_post", lambda *a, **kw: {"response": ""})
 
     result = text_extract_keywords("Something.")
     assert result["factual"] == []
