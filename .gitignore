@@ -38,3 +38,6 @@ ingest_status.json
 
 # PyInstaller
 *.spec.bak
+# Frontend
+frontend/node_modules/
+frontend/.vite/

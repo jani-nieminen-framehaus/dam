@@ -23,14 +23,18 @@ The backend is finished. Every endpoint exists. The frontend's job is to put but
 | Language | TypeScript | Type safety catches API contract drift early |
 | UI framework | React 18+ | Component model fits the panel layout |
 | Styling | Tailwind CSS | Utility-first, dark mode trivial |
-| State | Zustand | Minimal boilerplate, no Redux ceremony |
-| Data fetching | TanStack Query | Caching, pagination, background refetch |
+| Data fetching | TanStack Query | Server state, caching, pagination, background refetch |
+| UI state | Zustand | Lightbox open/closed, selection, sidebar — pure UI state only |
 | Build | Vite | Fast HMR, TypeScript native, outputs to `static/` |
 | Icons | Lucide React | Clean, MIT licensed |
 | Keyboard shortcuts | react-hotkeys-hook | Culling must be keyboard-driven |
 | Virtualization | @tanstack/react-virtual | 50k thumbnails need windowed rendering |
 
-**Not using:** Next.js (overkill), Redux (ceremony), Electron (pywebview handles desktop window).
+**Not using:** Next.js (overkill), Redux (ceremony), Electron (browser tab on dual 34" 4K panels is effectively a desktop app).
+
+**State boundary:** TanStack Query owns all server data (images, filters, stats). Zustand owns only ephemeral UI state (which image is selected, lightbox visibility, multi-select range, sidebar collapsed). Never duplicate server data in Zustand — use TanStack Query's `useMutation` with `onMutate` for optimistic updates during culling.
+
+**Error handling:** Every API consumer wraps errors. Ollama offline → search gracefully degrades. Volume unmounted → "open external" shows toast, not crash. TanStack Query's `onError` callbacks surface issues in a non-blocking toast/notification component.
 
 ---
 
@@ -154,8 +158,8 @@ dam/
 │       ├── types.ts           ← Image, FilterState, Cursor types
 │       ├── api/               ← TanStack Query hooks
 │       │   ├── client.ts, images.ts, search.ts, filters.ts, stats.ts
-│       ├── stores/            ← Zustand stores
-│       │   ├── useImageStore.ts, useCullingStore.ts
+│       ├── stores/            ← Zustand (UI state only, never server data)
+│       │   └── useUIStore.ts  ← lightbox, selection, sidebar, view mode
 │       ├── components/
 │       │   ├── layout/        ← Toolbar, Sidebar, MainPanel, StatusBar
 │       │   ├── grid/          ← ImageGrid, ImageCard, ImageList
@@ -173,35 +177,36 @@ dam/
 
 ## Milestones
 
-### M1: Grid + Thumbnails (Weekend 1)
-- Vite + React + Tailwind scaffolding
+### Weekend 1: Grid + Thumbnails
+- Vite + React + Tailwind project setup
 - Fetch `/api/images`, render thumbnail grid with virtualization
 - Infinite scroll with keyset pagination
 - Basic filter sidebar (camera, volume)
 
-### M2: Lightbox + Culling (Weekend 2)
+### Weekend 2: Lightbox + Culling
 - Lightbox overlay with EXIF panel
 - Keyboard shortcuts: P/R/U, 1-5, arrows
 - Optimistic PATCH updates (instant UI, async persist)
 - Auto-advance after pick/reject
 
-### M3: Search + Tags (Weekend 3)
+### Weekend 3: Search + Tags
 - Semantic search bar (debounced, replaces grid results)
 - AI tag display in lightbox
 - Keyword add/remove
 - Project assignment
 
-### M4: Bulk Operations + Polish (Weekend 4)
+### Weekend 4: Bulk Operations + Polish
 - Multi-select: Shift+Click, Cmd+A
 - Bulk pick/reject/rate
 - Status bar with counts
 - Ingest progress indicator
 - Dark mode default (Tailwind `dark:` classes)
 
-### M5: Desktop Window (Weekend 5)
-- pywebview integration (`dam serve --window`)
-- Menu bar, window title with filter/count
-- macOS native feel refinements
+### Weekend 5: Desktop Polish
+- `dam serve` opens browser tab (dual 34" 4K panels make a browser tab effectively a desktop app)
+- Consider pywebview only if native menu bar / file dialogs are needed
+- Window title with filter/count
+- Lightbox image preloading (N+1, N-1 for fast culling)
 
 ---
 
@@ -211,5 +216,8 @@ dam/
 - Optimistic updates essential for culling feel. Rating/pick must feel instant.
 - Dark mode by default. Photographers work in dark environments.
 - No Electron. pywebview already in the stack. Don't add 200MB of Chromium.
+- A browser tab on dual 34" 4K panels is effectively a desktop app.
 - Search and filters are mutually exclusive (search overrides filters).
 - JPEG sidecar preview in lightbox — don't try to serve 35GB ProRes through the browser.
+- Lightbox must preload N+1 and N-1 images for fast culling at speed.
+- Thumbnail grid uses `object-cover` on fixed squares — mixed aspect ratios (3:2, 4:3, 16:9) crop to fit.

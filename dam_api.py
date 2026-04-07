@@ -189,6 +189,16 @@ def spa():
     return send_from_directory(str(SPA_DIR), "index.html")
 
 
+@app.route("/assets/<path:filename>")
+def static_assets(filename):
+    return send_from_directory(str(SPA_DIR / "assets"), filename)
+
+
+@app.route("/favicon.svg")
+def favicon():
+    return send_from_directory(str(SPA_DIR), "favicon.svg")
+
+
 @app.route("/api/ingest/status", methods=["GET"])
 def ingest_status():
     progress_file = INGEST_STATUS_FILE
