@@ -5,9 +5,10 @@ import { Toolbar } from './components/layout/Toolbar'
 import { StatusBar } from './components/layout/StatusBar'
 import { FilterPanel } from './components/filters/FilterPanel'
 import { ImageGrid } from './components/grid/ImageGrid'
+import { Lightbox } from './components/lightbox/Lightbox'
 
 export default function App() {
-  const { filters, sidebarOpen, thumbSize } = useUIStore()
+  const { filters, sidebarOpen, thumbSize, lightboxIndex, closeLightbox, setLightboxIndex } = useUIStore()
   const {
     data,
     hasNextPage,
@@ -25,6 +26,7 @@ export default function App() {
   const totalFiltered = data?.pages[0]?.total_filtered ?? 0
 
   return (
+  <>
     <div className="h-full flex flex-col">
       <Toolbar totalFiltered={totalFiltered} />
 
@@ -64,5 +66,17 @@ export default function App() {
 
       <StatusBar totalFiltered={totalFiltered} totalLoaded={images.length} />
     </div>
+
+    {/* Lightbox overlay */}
+    {lightboxIndex !== null && images[lightboxIndex] && (
+      <Lightbox
+        image={images[lightboxIndex]}
+        images={images}
+        currentIndex={lightboxIndex}
+        onClose={closeLightbox}
+        onNavigate={setLightboxIndex}
+      />
+    )}
+  </>
   )
 }

@@ -5,10 +5,11 @@ import { useUIStore } from '../../stores/useUIStore'
 interface Props {
   image: DamImage
   size: number
+  index: number
 }
 
-export function ImageCard({ image, size }: Props) {
-  const { selectedId, select, toggleSelect } = useUIStore()
+export function ImageCard({ image, size, index }: Props) {
+  const { selectedId, select, toggleSelect, openLightbox } = useUIStore()
   const isSelected = selectedId === image.id
 
   const handleClick = (e: React.MouseEvent) => {
@@ -19,9 +20,14 @@ export function ImageCard({ image, size }: Props) {
     }
   }
 
+  const handleDoubleClick = () => {
+    openLightbox(index)
+  }
+
   return (
     <div
       onClick={handleClick}
+      onDoubleClick={handleDoubleClick}
       className="relative cursor-pointer group"
       style={{ width: size, height: size }}
     >

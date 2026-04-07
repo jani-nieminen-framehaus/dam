@@ -80,8 +80,8 @@ export function ImageGrid({ images, thumbSize, hasNextPage, isFetchingNextPage, 
                 gap,
               }}
             >
-              {rowImages.map((img) => (
-                <ImageCard key={img.id} image={img} size={thumbSize} />
+              {rowImages.map((img, colIdx) => (
+                <ImageCard key={img.id} image={img} size={thumbSize} index={startIdx + colIdx} />
               ))}
             </div>
           )

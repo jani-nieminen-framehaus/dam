@@ -13,6 +13,12 @@ interface UIState {
   toggleSelect: (id: number) => void
   clearSelection: () => void
 
+  // Lightbox
+  lightboxIndex: number | null
+  openLightbox: (index: number) => void
+  closeLightbox: () => void
+  setLightboxIndex: (index: number) => void
+
   // Filters (UI state that drives TanStack Query key)
   filters: FilterState
   setFilter: (key: keyof FilterState, value: string | number | undefined) => void
@@ -38,6 +44,11 @@ export const useUIStore = create<UIState>((set) => ({
       return { selectedIds: next, selectedId: id }
     }),
   clearSelection: () => set({ selectedId: null, selectedIds: new Set() }),
+
+  lightboxIndex: null,
+  openLightbox: (index) => set({ lightboxIndex: index }),
+  closeLightbox: () => set({ lightboxIndex: null }),
+  setLightboxIndex: (index) => set({ lightboxIndex: index }),
 
   filters: {},
   setFilter: (key, value) =>
