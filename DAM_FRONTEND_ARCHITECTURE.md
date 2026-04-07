@@ -1,10 +1,32 @@
 # DAM Frontend Architecture — Draft
 
-**Date:** 2026-04-06
-**Status:** Planning
-**Stack:** TypeScript + React + Tailwind CSS
-**IDE:** WebStorm (JetBrains, licensed through 2028)
-**Backend:** Existing Flask API at `localhost:5000`
+**Date:** 2026-04-07
+**Status:** Weekend 1 + 2 complete. Weekend 3 next.
+**Stack:** TypeScript + React + Tailwind CSS v4
+**IDE:** WebStorm (JetBrains, licensed)
+**Backend:** Flask API at `localhost:5001` (port 5000 blocked by macOS AirPlay)
+
+---
+
+## Development Setup
+
+```bash
+# Start the API (from project root)
+cd ~/Documents/dam
+/opt/homebrew/bin/gunicorn -w 2 -b 0.0.0.0:5001 dam_api:app
+
+# Start frontend dev server with hot reload (from frontend/)
+cd ~/Documents/dam/frontend
+NODE_ENV=development npm install   # NODE_ENV=production is set globally, must override
+NODE_ENV=development npm run dev   # Vite dev server at localhost:5173, proxies /api/* to :5001
+
+# Production build (outputs to ../static/, served by Flask)
+NODE_ENV=development npm run build
+```
+
+**Python:** `/opt/homebrew/bin/python3` (3.14). Flask/gunicorn in homebrew, not venv.
+**Node:** v25.6.1, npm 11.9.0 (`/opt/homebrew/bin/node`)
+**Tests:** `/opt/homebrew/bin/pytest tests/` — 110/110 passing
 
 ---
 
@@ -177,36 +199,53 @@ dam/
 
 ## Milestones
 
-### Weekend 1: Grid + Thumbnails
-- Vite + React + Tailwind project setup
-- Fetch `/api/images`, render thumbnail grid with virtualization
-- Infinite scroll with keyset pagination
-- Basic filter sidebar (camera, volume)
+### Weekend 1: Grid + Thumbnails — ✅ COMPLETE (2026-04-07)
+- ✅ Vite + React + Tailwind CSS v4 project setup (`frontend/`)
+- ✅ TanStack Query wired to `GET /api/images` with keyset pagination
+- ✅ TanStack Virtual grid (50k+ thumbnails, windowed rendering)
+- ✅ Infinite scroll (fetches next page when near bottom)
+- ✅ Filter sidebar: camera, volume, pick, edit status, project, color, min rating
+- ✅ Toolbar with thumbnail size slider and image count
+- ✅ Status bar with counts, active filters, selection count
+- ✅ Zustand UI store (selection, sidebar, filters, thumb size)
+- ✅ Flask routes for `/assets/` and `/favicon.svg` (Vite build output)
+- ✅ Production build outputs to `static/`, served by Flask on port 5001
+- ⚠️ Note: `NODE_ENV=development` required for `npm install` (system has NODE_ENV=production)
+- ⚠️ Note: Port 5000 blocked by macOS AirPlay Receiver — use 5001
 
-### Weekend 2: Lightbox + Culling
-- Lightbox overlay with EXIF panel
-- Keyboard shortcuts: P/R/U, 1-5, arrows
-- Optimistic PATCH updates (instant UI, async persist)
-- Auto-advance after pick/reject
+### Weekend 2: Lightbox + Culling — ✅ COMPLETE (2026-04-07)
+- ✅ Lightbox overlay (double-click thumbnail to open)
+- ✅ Keyboard shortcuts: P/R/U pick/reject, 1-5 rating, 0 clear, arrows navigate, Esc close
+- ✅ Optimistic PATCH mutations via TanStack Query `useMutation` + `onMutate`
+- ✅ Auto-advance after pick/reject (80ms delay for visual feedback)
+- ✅ EXIF line at bottom (camera · lens · focal · aperture · shutter · ISO)
+- ✅ AI description and keyword tags displayed when available
+- ✅ N+1 image preloading for fast culling speed
+- ✅ Clickable star rating and pick/reject buttons in lightbox top bar
 
-### Weekend 3: Search + Tags
-- Semantic search bar (debounced, replaces grid results)
-- AI tag display in lightbox
-- Keyword add/remove
-- Project assignment
+### Weekend 3: Search + Tags — 🔲 NOT STARTED
+- 🔲 Semantic search bar (debounced, wired to `GET /api/search?q=`)
+- 🔲 Search replaces grid results, clear button returns to filtered view
+- 🔲 AI tag display in lightbox (already showing, needs edit capability)
+- 🔲 Keyword add/remove in lightbox (`POST/DELETE /api/images/:id/keywords`)
+- 🔲 Project assignment in lightbox (`POST/DELETE /api/images/:id/projects`)
+- 🔲 "Open in Capture One" button (`POST /api/images/:id/open_external`)
+- 🔲 "Open JPEG sidecar" button (`POST /api/images/:id/open_jpeg`)
 
-### Weekend 4: Bulk Operations + Polish
-- Multi-select: Shift+Click, Cmd+A
-- Bulk pick/reject/rate
-- Status bar with counts
-- Ingest progress indicator
-- Dark mode default (Tailwind `dark:` classes)
+### Weekend 4: Bulk Operations + Polish — 🔲 NOT STARTED
+- 🔲 Multi-select: Shift+Click range select, Cmd+A select all visible
+- 🔲 Bulk pick/reject/rate (`PATCH /api/images/bulk`)
+- 🔲 Bulk delete (`DELETE /api/images/bulk`)
+- 🔲 Ingest progress indicator (polls `GET /api/ingest/status`)
+- 🔲 Error toast/notification component (Ollama offline, volume unmounted, etc.)
+- 🔲 Dark mode is already default — polish remaining UI rough edges
 
-### Weekend 5: Desktop Polish
-- `dam serve` opens browser tab (dual 34" 4K panels make a browser tab effectively a desktop app)
-- Consider pywebview only if native menu bar / file dialogs are needed
-- Window title with filter/count
-- Lightbox image preloading (N+1, N-1 for fast culling)
+### Weekend 5: Desktop Polish — 🔲 NOT STARTED
+- 🔲 `dam serve` command opens browser tab automatically
+- 🔲 Consider pywebview only if native menu bar / file dialogs are needed
+- 🔲 Window title with filter/count
+- 🔲 PyInstaller app (`dam.spec`) updated to include new `static/` build output
+- 🔲 ImageList (table view) as alternative to grid view
 
 ---
 
