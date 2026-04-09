@@ -1,5 +1,5 @@
 import { useRef, useState, useEffect } from 'react'
-import { PanelLeftClose, PanelLeft, Minus, Plus, Search, X, ArrowUpDown } from 'lucide-react'
+import { PanelLeftClose, PanelLeft, Minus, Plus, Search, X, ArrowUpDown, LayoutGrid, List } from 'lucide-react'
 import { useUIStore } from '../../stores/useUIStore'
 
 interface Props {
@@ -7,7 +7,7 @@ interface Props {
 }
 
 export function Toolbar({ totalFiltered }: Props) {
-  const { sidebarOpen, toggleSidebar, thumbSize, setThumbSize, searchQuery, setSearchQuery, clearSearch, sortBy, sortDir, setSortBy, toggleSortDir } = useUIStore()
+  const { sidebarOpen, toggleSidebar, thumbSize, setThumbSize, searchQuery, setSearchQuery, clearSearch, sortBy, sortDir, setSortBy, toggleSortDir, viewMode, setViewMode } = useUIStore()
   const [inputValue, setInputValue] = useState(searchQuery)
   const debounceRef = useRef<ReturnType<typeof setTimeout>>(null)
   const inputRef = useRef<HTMLInputElement>(null)
@@ -90,20 +90,40 @@ export function Toolbar({ totalFiltered }: Props) {
         {totalFiltered.toLocaleString()} images
       </span>
 
-      {/* Thumbnail size slider */}
-      <div className="flex items-center gap-1.5">
-        <Minus size={12} className="text-[var(--text-dim)]" />
-        <input
-          type="range"
-          min={100}
-          max={400}
-          step={25}
-          value={thumbSize}
-          onChange={(e) => setThumbSize(Number(e.target.value))}
-          className="w-20 accent-[var(--accent)]"
-        />
-        <Plus size={12} className="text-[var(--text-dim)]" />
+      {/* View mode toggle */}
+      <div className="flex items-center gap-0.5 border border-[var(--border)] rounded p-0.5">
+        <button
+          onClick={() => setViewMode('grid')}
+          className={`p-1 rounded transition-colors ${viewMode === 'grid' ? 'bg-[var(--accent)] text-black' : 'text-[var(--text-dim)] hover:text-white'}`}
+          title="Grid view"
+        >
+          <LayoutGrid size={14} />
+        </button>
+        <button
+          onClick={() => setViewMode('list')}
+          className={`p-1 rounded transition-colors ${viewMode === 'list' ? 'bg-[var(--accent)] text-black' : 'text-[var(--text-dim)] hover:text-white'}`}
+          title="List view"
+        >
+          <List size={14} />
+        </button>
       </div>
+
+      {/* Thumbnail size slider — grid only */}
+      {viewMode === 'grid' && (
+        <div className="flex items-center gap-1.5">
+          <Minus size={12} className="text-[var(--text-dim)]" />
+          <input
+            type="range"
+            min={100}
+            max={400}
+            step={25}
+            value={thumbSize}
+            onChange={(e) => setThumbSize(Number(e.target.value))}
+            className="w-20 accent-[var(--accent)]"
+          />
+          <Plus size={12} className="text-[var(--text-dim)]" />
+        </div>
+      )}
     </div>
   )
 }

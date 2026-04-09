@@ -1,7 +1,20 @@
 import { create } from 'zustand'
 import type { DamImage, FilterState } from '../types'
 
+export type ToastType = 'error' | 'warning' | 'info' | 'success'
+
+export interface Toast {
+  id: string
+  message: string
+  type: ToastType
+}
+
 interface UIState {
+  // Toasts
+  toasts: Toast[]
+  addToast: (message: string, type?: ToastType) => void
+  dismissToast: (id: string) => void
+
   // Sidebar
   sidebarOpen: boolean
   toggleSidebar: () => void
@@ -46,12 +59,26 @@ interface UIState {
   helpOpen: boolean
   toggleHelp: () => void
 
-  // View
+  // View mode
+  viewMode: 'grid' | 'list'
+  setViewMode: (mode: 'grid' | 'list') => void
+
+  // Thumb size (grid only)
   thumbSize: number
   setThumbSize: (size: number) => void
 }
 
 export const useUIStore = create<UIState>((set) => ({
+  toasts: [],
+  addToast: (message, type = 'error') => {
+    const id = `${Date.now()}-${Math.random()}`
+    set((s) => ({ toasts: [...s.toasts, { id, message, type }] }))
+    if (type !== 'error') {
+      setTimeout(() => set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) })), 5000)
+    }
+  },
+  dismissToast: (id) => set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) })),
+
   sidebarOpen: true,
   toggleSidebar: () => set((s) => ({ sidebarOpen: !s.sidebarOpen })),
 
@@ -109,6 +136,9 @@ export const useUIStore = create<UIState>((set) => ({
 
   helpOpen: false,
   toggleHelp: () => set((s) => ({ helpOpen: !s.helpOpen })),
+
+  viewMode: 'grid',
+  setViewMode: (mode) => set({ viewMode: mode }),
 
   thumbSize: 200,
   setThumbSize: (size) => set({ thumbSize: size }),

@@ -45,7 +45,7 @@ from dam_config import (
     THUMB_DIR,
     VOLUME_ALIASES,
 )
-from dam_db import get_db, serialize_vector
+from dam_db import get_db, serialize_vector, wal_checkpoint
 from platform_utils import open_path_external
 from storage_utils import resolve_archive_file
 
@@ -428,6 +428,7 @@ def images_bulk_patch():
             [*values, int(img_id)],
         )
     db.commit()
+    wal_checkpoint(db)
 
     return jsonify({"updated": len(ids)})
 
@@ -472,6 +473,7 @@ def images_bulk_delete():
         db.execute("DELETE FROM thumbnails WHERE image_id = ?", (int(img_id),))
         db.execute("DELETE FROM images WHERE id = ?", (int(img_id),))
     db.commit()
+    wal_checkpoint(db)
 
     # Remove cached thumbnails
 

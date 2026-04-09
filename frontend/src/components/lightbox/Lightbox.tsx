@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { X, ChevronLeft, ChevronRight, Star, FolderOpen, Image as ImageIcon, ChevronDown, Search } from 'lucide-react'
+import { X, ChevronLeft, ChevronRight, FolderOpen, Image as ImageIcon, ChevronDown, Search } from 'lucide-react'
 import type { DamImage } from '../../types'
 import { usePatchImage, useOpenExternal, useOpenJpeg, useAddKeyword, useRemoveKeyword, useAddProject, useRemoveProject } from '../../api/images'
 import { useInstalledApps, useFilters } from '../../api/filters'
 import { useUIStore } from '../../stores/useUIStore'
+import { StarRating } from '../shared/StarRating'
 
 const DEFAULT_APPS: { label: string; app: string | undefined }[] = [
   { label: 'System default', app: undefined },
@@ -193,14 +194,7 @@ export function Lightbox({ image, images, currentIndex, onClose, onNavigate }: P
           </button>
           <div className="w-px h-4 bg-[var(--border)]" />
           {/* Star rating */}
-          <div className="flex gap-0.5">
-            {[1, 2, 3, 4, 5].map((n) => (
-              <button key={n} onClick={() => setRating(image.rating === n ? 0 : n)}>
-                <Star size={16} fill={n <= image.rating ? 'var(--accent)' : 'none'}
-                  stroke={n <= image.rating ? 'var(--accent)' : 'var(--text-dim)'} />
-              </button>
-            ))}
-          </div>
+          <StarRating value={image.rating} onChange={setRating} size="md" />
           <div className="w-px h-4 bg-[var(--border)]" />
           {/* Open in external app — split button */}
           <div className="relative flex items-center">

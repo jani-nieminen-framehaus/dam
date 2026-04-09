@@ -7,11 +7,13 @@ import { Toolbar } from './components/layout/Toolbar'
 import { StatusBar } from './components/layout/StatusBar'
 import { FilterPanel } from './components/filters/FilterPanel'
 import { ImageGrid } from './components/grid/ImageGrid'
+import { ImageList } from './components/list/ImageList'
 import { Lightbox } from './components/lightbox/Lightbox'
 import { KeyboardHelp } from './components/shared/KeyboardHelp'
+import { ToastContainer } from './components/shared/Toast'
 
 export default function App() {
-  const { filters, sidebarOpen, searchQuery, sortBy, sortDir, thumbSize, lightboxIndex, helpOpen, toggleHelp, clearFilters, closeLightbox, setLightboxIndex } = useUIStore()
+  const { filters, sidebarOpen, searchQuery, sortBy, sortDir, thumbSize, viewMode, lightboxIndex, helpOpen, toggleHelp, clearFilters, closeLightbox, setLightboxIndex } = useUIStore()
   const isSearching = searchQuery.length > 0
 
   // Merge sort into filters for the query key
@@ -116,10 +118,18 @@ export default function App() {
               )}
             </div>
           )}
-          {!isLoading && !isError && images.length > 0 && (
+          {!isLoading && !isError && images.length > 0 && viewMode === 'grid' && (
             <ImageGrid
               images={images}
               thumbSize={thumbSize}
+              hasNextPage={isSearching ? false : (feed.hasNextPage ?? false)}
+              isFetchingNextPage={isSearching ? false : feed.isFetchingNextPage}
+              fetchNextPage={feed.fetchNextPage}
+            />
+          )}
+          {!isLoading && !isError && images.length > 0 && viewMode === 'list' && (
+            <ImageList
+              images={images}
               hasNextPage={isSearching ? false : (feed.hasNextPage ?? false)}
               isFetchingNextPage={isSearching ? false : feed.isFetchingNextPage}
               fetchNextPage={feed.fetchNextPage}
@@ -144,6 +154,9 @@ export default function App() {
 
     {/* Keyboard shortcuts help */}
     {helpOpen && <KeyboardHelp onClose={toggleHelp} />}
+
+    {/* Global toasts */}
+    <ToastContainer />
   </>
   )
 }

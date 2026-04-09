@@ -1,7 +1,7 @@
 # DAM Frontend Architecture — Draft
 
-**Date:** 2026-04-07
-**Status:** Weekend 1 + 2 complete. Weekend 3 next.
+**Date:** 2026-04-09
+**Status:** Weekends 1–5 complete. Sprint 4 (list view + audit fixes) next.
 **Stack:** TypeScript + React + Tailwind CSS v4
 **IDE:** WebStorm (JetBrains, licensed)
 **Backend:** Flask API at `localhost:5001` (port 5000 blocked by macOS AirPlay)
@@ -26,7 +26,7 @@ NODE_ENV=development npm run build
 
 **Python:** `/opt/homebrew/bin/python3` (3.14). Flask/gunicorn in homebrew, not venv.
 **Node:** v25.6.1, npm 11.9.0 (`/opt/homebrew/bin/node`)
-**Tests:** `/opt/homebrew/bin/pytest tests/` — 110/110 passing
+**Tests:** `/opt/homebrew/bin/pytest tests/` — 120/120 passing
 
 ---
 
@@ -223,29 +223,42 @@ dam/
 - ✅ N+1 image preloading for fast culling speed
 - ✅ Clickable star rating and pick/reject buttons in lightbox top bar
 
-### Weekend 3: Search + Tags — 🔲 NOT STARTED
-- 🔲 Semantic search bar (debounced, wired to `GET /api/search?q=`)
-- 🔲 Search replaces grid results, clear button returns to filtered view
-- 🔲 AI tag display in lightbox (already showing, needs edit capability)
-- 🔲 Keyword add/remove in lightbox (`POST/DELETE /api/images/:id/keywords`)
-- 🔲 Project assignment in lightbox (`POST/DELETE /api/images/:id/projects`)
-- 🔲 "Open in Capture One" button (`POST /api/images/:id/open_external`)
-- 🔲 "Open JPEG sidecar" button (`POST /api/images/:id/open_jpeg`)
+### Weekend 3: Search + Tags — ✅ COMPLETE (2026-04-09)
+- ✅ Semantic search bar (debounced, wired to `GET /api/search?q=`)
+- ✅ Search replaces grid results, clear button returns to filtered view
+- ✅ AI tag display in lightbox (editable)
+- ✅ Keyword add/remove in lightbox (`POST/DELETE /api/images/:id/keywords`)
+- ✅ Project assignment in lightbox (`POST/DELETE /api/images/:id/projects`)
+- ✅ "Open in external app" split button with configurable default + browsable app list
+- ✅ "Open JPEG sidecar" button (`O`/`J` keys)
 
-### Weekend 4: Bulk Operations + Polish — 🔲 NOT STARTED
-- 🔲 Multi-select: Shift+Click range select, Cmd+A select all visible
-- 🔲 Bulk pick/reject/rate (`PATCH /api/images/bulk`)
-- 🔲 Bulk delete (`DELETE /api/images/bulk`)
-- 🔲 Ingest progress indicator (polls `GET /api/ingest/status`)
-- 🔲 Error toast/notification component (Ollama offline, volume unmounted, etc.)
-- 🔲 Dark mode is already default — polish remaining UI rough edges
+### Weekend 4: Bulk Operations + Polish — ✅ COMPLETE (2026-04-09)
+- ✅ Multi-select: Shift+Click range select, Cmd+A select all visible
+- ✅ Bulk pick/reject/rate (`PATCH /api/images/bulk`)
+- ✅ Bulk delete (`DELETE /api/images/bulk`)
+- ✅ Ingest progress indicator (polls `GET /api/ingest/status`)
+- ✅ Sort selector (date_taken, rating, file_name, camera) + direction toggle
+- ✅ Date range filter UI wired to date_from/date_to
+- ✅ Keyboard shortcuts help overlay (`?` key)
+- 🔲 Global error toast/notification component (Sprint 4)
+- ✅ Dark mode default throughout
 
-### Weekend 5: Desktop Polish — 🔲 NOT STARTED
-- 🔲 `dam serve` command opens browser tab automatically
-- 🔲 Consider pywebview only if native menu bar / file dialogs are needed
-- 🔲 Window title with filter/count
-- 🔲 PyInstaller app (`dam.spec`) updated to include new `static/` build output
-- 🔲 ImageList (table view) as alternative to grid view
+### Weekend 5: Desktop Polish — ✅ COMPLETE (2026-04-09)
+- ✅ pywebview native macOS window with JS bridge + native menu bar
+- ✅ Window title with filter/count (via `pywebview.api.set_title()`)
+- ✅ PyInstaller one-directory `.app` bundle (`dam.spec`) with sqlite_vec.dylib
+- ✅ Custom gold aperture icon (`assets/icon.icns`)
+- ✅ Makefile: `make build`, `make run`, `make test`, `make clean`
+- ✅ PACKAGING.md updated
+- 🔲 ImageList (table view) as alternative to grid — Sprint 4
+
+### Sprint 4: List View + Stability — 🔲 IN PROGRESS
+- 🔲 Fix route param bug: `<n>` → `<name>` in projects/subjects DELETE endpoints
+- 🔲 Backend audit fixes: schema version guard, connection context manager, serialize_vector dedup, partial index, WAL checkpoint, A7C II camera mapping
+- 🔲 Global error toast system (bottom-right, auto-dismiss, wire to all failure paths)
+- 🔲 `components/shared/StarRating.tsx` — extracted, reused in lightbox + list rows
+- 🔲 `components/list/ImageList.tsx` — virtual rows: thumb + filename + date + camera + stars + pick badge + keywords
+- 🔲 Toolbar grid/list toggle (LayoutGrid / List icons)
 
 ---
 

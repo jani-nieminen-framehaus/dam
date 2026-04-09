@@ -1,6 +1,7 @@
 import { useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import type { DamImage, ImagesResponse, FilterState } from '../types'
 import { apiFetch, buildQueryString } from './client'
+import { useUIStore } from '../stores/useUIStore'
 
 const PAGE_SIZE = 50
 
@@ -52,8 +53,8 @@ export function usePatchImage() {
       )
     },
     onError: () => {
-      // Rollback on failure — refetch from server
       qc.invalidateQueries({ queryKey: ['images'] })
+      useUIStore.getState().addToast('Failed to save — check connection', 'error')
     },
   })
 }
@@ -100,6 +101,9 @@ export function useOpenExternal() {
         body: app ? JSON.stringify({ app }) : undefined,
       })
     },
+    onError: () => {
+      useUIStore.getState().addToast('Could not open file — is the volume mounted?', 'warning')
+    },
   })
 }
 
@@ -122,6 +126,7 @@ export function useAddKeyword() {
         body: JSON.stringify({ keyword }),
       }),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['images'] }) },
+    onError: () => { useUIStore.getState().addToast('Keyword update failed', 'error') },
   })
 }
 
@@ -133,6 +138,7 @@ export function useRemoveKeyword() {
         method: 'DELETE',
       }),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['images'] }) },
+    onError: () => { useUIStore.getState().addToast('Keyword update failed', 'error') },
   })
 }
 
