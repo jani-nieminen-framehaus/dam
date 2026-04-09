@@ -58,7 +58,7 @@ DEFAULTS = {
     "burst_gap_seconds": 2.0,
     "burst_min_size": 3,
     "tagger_workers": 6,
-    "port": 5000,
+    "port": 5001,
     "gunicorn_workers": 4,
     "page_size": 50,
     "window_size": [1200, 800],
@@ -93,9 +93,9 @@ def _load_config():
         except OSError:
             pass  # non-fatal: defaults still work
 
-    # Frozen binary override: PyInstaller sets dam_root to executable dir
-    if getattr(sys, "frozen", False):
-        cfg["dam_root"] = str(Path(sys.executable).resolve().parent)
+    # When frozen (PyInstaller), keep the default ~/Documents/dam as dam_root.
+    # The app can live anywhere (/Applications, etc.) — data stays in one place.
+    # User's ~/.dam/config.json can override dam_root if needed.
 
     # Convert dam_root to Path and derive dependent paths
     cfg["dam_root"] = Path(cfg["dam_root"])

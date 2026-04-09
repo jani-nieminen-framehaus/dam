@@ -6,17 +6,20 @@ interface Props {
   image: DamImage
   size: number
   index: number
+  allImages: DamImage[]
 }
 
-export function ImageCard({ image, size, index }: Props) {
-  const { selectedId, select, toggleSelect, openLightbox } = useUIStore()
-  const isSelected = selectedId === image.id
+export function ImageCard({ image, size, index, allImages }: Props) {
+  const { selectedIds, lastClickedIndex, select, toggleSelect, rangeSelect, openLightbox } = useUIStore()
+  const isSelected = selectedIds.has(image.id)
 
   const handleClick = (e: React.MouseEvent) => {
-    if (e.metaKey || e.ctrlKey) {
+    if (e.shiftKey && lastClickedIndex !== null) {
+      rangeSelect(lastClickedIndex, index, allImages)
+    } else if (e.metaKey || e.ctrlKey) {
       toggleSelect(image.id)
     } else {
-      select(image.id)
+      select(image.id, index)
     }
   }
 

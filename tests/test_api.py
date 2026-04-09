@@ -412,3 +412,92 @@ def test_filter_combined_subject_camera_date(tmp_dam_root, app_client):
     data = resp.get_json()
     assert len(data["images"]) == 1
     assert data["images"][0]["camera_short"] == "Zf"
+
+
+# ── Search endpoint ──────────────────────────────────────────────────────────
+
+
+def test_search_empty_query(tmp_dam_root, app_client):
+    resp = app_client.get("/api/search")
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data["images"] == []
+    assert data["total_filtered"] == 0
+
+
+def test_search_empty_q_param(tmp_dam_root, app_client):
+    resp = app_client.get("/api/search?q=")
+    assert resp.status_code == 200
+    assert resp.get_json()["images"] == []
+
+
+def test_search_ollama_down(tmp_dam_root, app_client, monkeypatch):
+    import dam_api
+
+    monkeypatch.setattr(dam_api, "get_embedding", lambda text, max_retries=3: None)
+    resp = app_client.get("/api/search?q=sunset")
+    assert resp.status_code == 500
+
+
+# ── Open external ────────────────────────────────────────────────────────────
+
+
+def test_open_external_image_not_found(tmp_dam_root, app_client):
+    resp = app_client.post("/api/images/99999/open_external", content_type="application/json")
+    assert resp.status_code == 404
+
+
+def test_open_external_file_not_on_disk(tmp_dam_root, app_client):
+    img_id = _insert_test_image(tmp_dam_root)
+    resp = app_client.post(f"/api/images/{img_id}/open_external", content_type="application/json")
+    assert resp.status_code == 404
+
+
+def test_open_jpeg_image_not_found(tmp_dam_root, app_client):
+    resp = app_client.post("/api/images/99999/open_jpeg", content_type="application/json")
+    assert resp.status_code == 404
+
+
+# ── Apps endpoint ────────────────────────────────────────────────────────────
+
+
+def test_list_apps(tmp_dam_root, app_client):
+    resp = app_client.get("/api/apps")
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert "apps" in data
+    assert isinstance(data["apps"], list)
+
+
+# ── Sort ─────────────────────────────────────────────────────────────────────
+
+
+def test_sort_by_rating(tmp_dam_root, app_client):
+    """Sort by rating returns images in rating order."""
+    import sqlite3
+
+    import dam_config
+
+    conn = sqlite3.connect(str(dam_config.DB_PATH))
+    conn.execute(
+        "INSERT INTO images (file_path, file_name, file_type, rating, pick, edit_status) "
+        "VALUES ('/test/A.RW2', 'A.RW2', 'RW2', 5, 'unmarked', 'unculled')"
+    )
+    conn.execute(
+        "INSERT INTO images (file_path, file_name, file_type, rating, pick, edit_status) "
+        "VALUES ('/test/B.RW2', 'B.RW2', 'RW2', 1, 'unmarked', 'unculled')"
+    )
+    conn.commit()
+    conn.close()
+
+    resp = app_client.get("/api/images?sort_by=rating&sort_dir=desc")
+    data = resp.get_json()
+    ratings = [img["rating"] for img in data["images"]]
+    assert ratings == sorted(ratings, reverse=True)
+
+
+def test_sort_invalid_column_falls_back(tmp_dam_root, app_client):
+    """Invalid sort column falls back to date_taken."""
+    _insert_test_image(tmp_dam_root)
+    resp = app_client.get("/api/images?sort_by=malicious_col")
+    assert resp.status_code == 200

@@ -11,7 +11,7 @@ def test_defaults_without_config_file(tmp_path, monkeypatch):
     monkeypatch.setattr(dam_config, "CONFIG_FILE", tmp_path / "nonexistent" / "config.json")
     cfg = dam_config._load_config()
 
-    assert cfg["port"] == 5000
+    assert cfg["port"] == 5001
     assert cfg["thumb_workers"] == 8
     assert cfg["burst_gap_seconds"] == 2.0
     assert cfg["embed_dim"] == 768
@@ -87,6 +87,20 @@ def test_auto_create_config(tmp_path, monkeypatch):
     data = json.loads(config_file.read_text())
     assert "port" in data
     assert "ollama_base" in data
+
+
+def test_frozen_does_not_override_dam_root(tmp_path, monkeypatch):
+    """When frozen (PyInstaller), dam_root stays as ~/Documents/dam, not exe dir."""
+    import dam_config
+
+    monkeypatch.setattr(dam_config, "CONFIG_FILE", tmp_path / "nonexistent" / "config.json")
+    monkeypatch.setattr("sys.frozen", True, raising=False)
+    monkeypatch.setattr("sys.executable", "/Applications/DAM.app/Contents/MacOS/dam")
+    cfg = dam_config._load_config()
+
+    # dam_root should be the default ~/Documents/dam, NOT /Applications/DAM.app/Contents/MacOS/
+    assert "Applications" not in str(cfg["dam_root"])
+    assert cfg["dam_root"] == Path.home() / "Documents" / "dam"
 
 
 def test_ignore_volumes_is_set(tmp_path, monkeypatch):

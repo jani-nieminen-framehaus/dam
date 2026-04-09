@@ -1,16 +1,24 @@
 import { create } from 'zustand'
-import type { FilterState } from '../types'
+import type { DamImage, FilterState } from '../types'
 
 interface UIState {
   // Sidebar
   sidebarOpen: boolean
   toggleSidebar: () => void
 
+  // Search
+  searchQuery: string
+  setSearchQuery: (q: string) => void
+  clearSearch: () => void
+
   // Selection
   selectedId: number | null
   selectedIds: Set<number>
-  select: (id: number) => void
+  lastClickedIndex: number | null
+  select: (id: number, index?: number) => void
   toggleSelect: (id: number) => void
+  rangeSelect: (fromIndex: number, toIndex: number, allImages: DamImage[]) => void
+  selectAll: (allImages: DamImage[]) => void
   clearSelection: () => void
 
   // Lightbox
@@ -24,6 +32,20 @@ interface UIState {
   setFilter: (key: keyof FilterState, value: string | number | undefined) => void
   clearFilters: () => void
 
+  // External apps
+  lastOpenApp: string | undefined
+  setLastOpenApp: (app: string | undefined) => void
+
+  // Sort
+  sortBy: string
+  sortDir: 'asc' | 'desc'
+  setSortBy: (s: string) => void
+  toggleSortDir: () => void
+
+  // Help
+  helpOpen: boolean
+  toggleHelp: () => void
+
   // View
   thumbSize: number
   setThumbSize: (size: number) => void
@@ -33,9 +55,14 @@ export const useUIStore = create<UIState>((set) => ({
   sidebarOpen: true,
   toggleSidebar: () => set((s) => ({ sidebarOpen: !s.sidebarOpen })),
 
+  searchQuery: '',
+  setSearchQuery: (q) => set({ searchQuery: q }),
+  clearSearch: () => set({ searchQuery: '' }),
+
   selectedId: null,
   selectedIds: new Set(),
-  select: (id) => set({ selectedId: id, selectedIds: new Set([id]) }),
+  lastClickedIndex: null,
+  select: (id, index) => set({ selectedId: id, selectedIds: new Set([id]), lastClickedIndex: index ?? null }),
   toggleSelect: (id) =>
     set((s) => {
       const next = new Set(s.selectedIds)
@@ -43,7 +70,22 @@ export const useUIStore = create<UIState>((set) => ({
       else next.add(id)
       return { selectedIds: next, selectedId: id }
     }),
-  clearSelection: () => set({ selectedId: null, selectedIds: new Set() }),
+  rangeSelect: (fromIndex, toIndex, allImages) =>
+    set((s) => {
+      const lo = Math.min(fromIndex, toIndex)
+      const hi = Math.max(fromIndex, toIndex)
+      const next = new Set(s.selectedIds)
+      for (let i = lo; i <= hi; i++) {
+        if (allImages[i]) next.add(allImages[i].id)
+      }
+      return { selectedIds: next, selectedId: allImages[toIndex]?.id ?? s.selectedId }
+    }),
+  selectAll: (allImages) =>
+    set(() => ({
+      selectedIds: new Set(allImages.map((img) => img.id)),
+      selectedId: allImages[allImages.length - 1]?.id ?? null,
+    })),
+  clearSelection: () => set({ selectedId: null, selectedIds: new Set(), lastClickedIndex: null }),
 
   lightboxIndex: null,
   openLightbox: (index) => set({ lightboxIndex: index }),
@@ -56,6 +98,17 @@ export const useUIStore = create<UIState>((set) => ({
       filters: { ...s.filters, [key]: value || undefined },
     })),
   clearFilters: () => set({ filters: {} }),
+
+  lastOpenApp: undefined,
+  setLastOpenApp: (app) => set({ lastOpenApp: app }),
+
+  sortBy: 'date_taken',
+  sortDir: 'desc',
+  setSortBy: (s) => set({ sortBy: s }),
+  toggleSortDir: () => set((prev) => ({ sortDir: prev.sortDir === 'desc' ? 'asc' : 'desc' })),
+
+  helpOpen: false,
+  toggleHelp: () => set((s) => ({ helpOpen: !s.helpOpen })),
 
   thumbSize: 200,
   setThumbSize: (size) => set({ thumbSize: size }),

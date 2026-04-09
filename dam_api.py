@@ -39,6 +39,7 @@ from dam_config import (
     IGNORE_VOLUMES,
     INGEST_STATUS_FILE,
     OLLAMA_BASE,
+    OLLAMA_BASE_EMBED,
     PAGE_SIZE,
     SPA_DIR,
     THUMB_DIR,
@@ -199,6 +200,18 @@ def favicon():
     return send_from_directory(str(SPA_DIR), "favicon.svg")
 
 
+@app.route("/api/apps", methods=["GET"])
+def list_apps():
+    """List installed macOS applications suitable for opening media files."""
+    apps_dir = Path("/Applications")
+    if not apps_dir.is_dir():
+        return jsonify({"apps": []})
+    names = sorted(
+        p.stem for p in apps_dir.glob("*.app")
+    )
+    return jsonify({"apps": names})
+
+
 @app.route("/api/ingest/status", methods=["GET"])
 def ingest_status():
     progress_file = INGEST_STATUS_FILE
@@ -217,10 +230,22 @@ def thumb(filename):
     return send_from_directory(str(THUMB_DIR), filename)
 
 
+_ALLOWED_SORT_COLS = {"date_taken", "rating", "file_name", "camera_short"}
+
+
 @app.route("/api/images", methods=["GET"])
 def images():
     limit = min(int(request.args.get("limit", PAGE_SIZE)), 200)
     where, params = build_filters(request.args)
+
+    # Sort
+    sort_by = request.args.get("sort_by", "date_taken")
+    if sort_by not in _ALLOWED_SORT_COLS:
+        sort_by = "date_taken"
+    sort_dir = request.args.get("sort_dir", "desc").upper()
+    if sort_dir not in ("ASC", "DESC"):
+        sort_dir = "DESC"
+    order_clause = f"ORDER BY i.{sort_by} {sort_dir}, i.id {sort_dir}"
 
     sql = f"""
         SELECT i.*,
@@ -239,12 +264,12 @@ def images():
         LEFT JOIN keywords k         ON ik.keyword_id = k.id
         {where}
         GROUP BY i.id
-        ORDER BY i.date_taken DESC, i.id DESC
+        {order_clause}
         LIMIT ?
     """
 
     # Count without cursor or limit
-    count_args = {k: v for k, v in request.args.items() if k not in ("cursor_date", "cursor_id", "limit")}
+    count_args = {k: v for k, v in request.args.items() if k not in ("cursor_date", "cursor_id", "limit", "sort_by", "sort_dir")}
     count_where, count_params = build_filters(count_args)
     count_sql = f"SELECT COUNT(*) FROM images i {count_where}"
 
@@ -264,18 +289,27 @@ def images():
 # ── AI Embeddings ─────────────────────────────────────────────────────────────
 
 
-def get_embedding(text):
-    """Fetch embedding from local Ollama instance."""
-    url = f"{OLLAMA_BASE}/api/embeddings"
+def get_embedding(text, max_retries=3):
+    """Fetch embedding from local Ollama instance with retry."""
+    import time
+
+    url = f"{OLLAMA_BASE_EMBED}/api/embeddings"
     payload = json.dumps({"model": EMBED_MODEL, "prompt": text}).encode()
     req = urllib.request.Request(url, data=payload, headers={"Content-Type": "application/json"}, method="POST")
-    try:
-        with urllib.request.urlopen(req, timeout=30) as resp:
-            data = json.loads(resp.read().decode())
-            return data.get("embedding", [])
-    except urllib.error.URLError as e:
-        print(f"Error connecting to Ollama: {e}")
-        return None
+
+    for attempt in range(max_retries):
+        try:
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                data = json.loads(resp.read().decode())
+                return data.get("embedding", [])
+        except urllib.error.URLError as e:
+            if attempt < max_retries - 1:
+                wait = 2 ** attempt
+                print(f"Ollama retry {attempt + 1}/{max_retries} in {wait}s: {e}")
+                time.sleep(wait)
+            else:
+                print(f"Ollama unreachable after {max_retries} attempts: {e}")
+                return None
 
 
 @app.route("/api/search", methods=["GET"])

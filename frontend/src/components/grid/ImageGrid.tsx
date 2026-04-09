@@ -2,6 +2,7 @@ import { useRef, useCallback, useMemo, useEffect } from 'react'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import type { DamImage } from '../../types'
 import { ImageCard } from './ImageCard'
+import { useUIStore } from '../../stores/useUIStore'
 
 interface Props {
   images: DamImage[]
@@ -13,6 +14,20 @@ interface Props {
 
 export function ImageGrid({ images, thumbSize, hasNextPage, isFetchingNextPage, fetchNextPage }: Props) {
   const parentRef = useRef<HTMLDivElement>(null)
+  const { selectAll, lightboxIndex } = useUIStore()
+
+  // Cmd+A to select all visible images
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (lightboxIndex !== null) return // Don't intercept while lightbox is open
+      if ((e.metaKey || e.ctrlKey) && e.key === 'a') {
+        e.preventDefault()
+        selectAll(images)
+      }
+    }
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
+  }, [images, selectAll, lightboxIndex])
   const gap = 4
 
   // Calculate columns based on container width
@@ -81,7 +96,7 @@ export function ImageGrid({ images, thumbSize, hasNextPage, isFetchingNextPage, 
               }}
             >
               {rowImages.map((img, colIdx) => (
-                <ImageCard key={img.id} image={img} size={thumbSize} index={startIdx + colIdx} />
+                <ImageCard key={img.id} image={img} size={thumbSize} index={startIdx + colIdx} allImages={images} />
               ))}
             </div>
           )

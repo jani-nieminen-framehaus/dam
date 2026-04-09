@@ -27,3 +27,13 @@ html, body, #root {
 ::-webkit-scrollbar-track { background: var(--bg2); }
 ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--text-dim); }
+
+/* Dark theme date input picker icon */
+.date-input-dark::-webkit-calendar-picker-indicator { filter: invert(0.7); }
+
+/* Flash notification fade-in */
+@keyframes fade-in {
+  from { opacity: 0; transform: translate(-50%, -4px); }
+  to { opacity: 1; transform: translate(-50%, 0); }
+}
+.animate-fade-in { animation: fade-in 0.15s ease-out; }

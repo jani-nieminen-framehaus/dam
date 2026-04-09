@@ -1,27 +1,40 @@
-# PyInstaller spec for DAM (one-file build).
-# Run from project root: pyinstaller dam.spec
-# Put the built executable (dist/dam) in your project root; it uses that dir as DAM_ROOT for DB, static, thumbs.
+# PyInstaller spec for DAM (one-directory / .app bundle).
+# Run from project root: pyinstaller dam.spec (or: make build)
+# DAM_ROOT is always ~/Documents/dam — the .app can live anywhere (e.g. /Applications).
 # Requires: pip install pyinstaller; exiftool and (for tag/search) Ollama are not bundled.
 
 from pathlib import Path
 from PyInstaller.utils.hooks import collect_submodules
 
+import sqlite_vec as _sv
+
 block_cipher = None
 root = Path(".")
 gunicorn_hidden = collect_submodules("gunicorn")
 
+# sqlite_vec native extension must be bundled explicitly
+_sv_dir = Path(_sv.__file__).parent
+_sv_bins = [(str(_sv_dir / "vec0.dylib"), "sqlite_vec")]
+
 a = Analysis(
     ["dam_runner.py"],
     pathex=[str(root)],
-    binaries=[],
+    binaries=_sv_bins,
     datas=[
         (str(root / "dam.py"), "."),
+        (str(root / "dam_config.py"), "."),
+        (str(root / "dam_db.py"), "."),
+        (str(root / "dam_schema.py"), "."),
+        (str(root / "platform_utils.py"), "."),
+        (str(root / "storage_utils.py"), "."),
         (str(root / "card_ingest.py"), "."),
         (str(root / "dam_scanner.py"), "."),
         (str(root / "dam_tagger.py"), "."),
         (str(root / "dam_api.py"), "."),
+        (str(root / "static"), "static"),
     ],
-    hiddenimports=["flask", "sqlite_vec", "dam_api", "webview"] + gunicorn_hidden,
+    hiddenimports=["flask", "sqlite_vec", "dam_api", "dam_config", "dam_db",
+                   "dam_schema", "platform_utils", "storage_utils", "webview"] + gunicorn_hidden,
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
@@ -34,13 +47,12 @@ a = Analysis(
 
 pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 
+# One-directory EXE (required for .app bundles in PyInstaller 7+)
 exe = EXE(
     pyz,
     a.scripts,
-    a.binaries,
-    a.zipfiles,
-    a.datas,
     [],
+    exclude_binaries=True,
     name="dam",
     debug=False,
     bootloader_ignore_signals=False,
@@ -52,12 +64,25 @@ exe = EXE(
     disable_windowed_mode=False,
 )
 
-app = BUNDLE(
+coll = COLLECT(
     exe,
+    a.binaries,
+    a.zipfiles,
+    a.datas,
+    strip=False,
+    upx=True,
+    upx_exclude=[],
+    name="dam",
+)
+
+app = BUNDLE(
+    coll,
     name="DAM.app",
-    icon=None,
-    bundle_identifier="com.dam.app",
+    icon="assets/icon.icns",
+    bundle_identifier="com.janinieminen.dam",
     info_plist={
-        "NSHighResolutionCapable": "True"
+        "NSHighResolutionCapable": "True",
+        "CFBundleDisplayName": "DAM",
+        "CFBundleShortVersionString": "0.1.0",
     },
 )

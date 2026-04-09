@@ -103,4 +103,6 @@ export interface FilterState {
   subject?: string
   date_from?: string
   date_to?: string
+  sort_by?: string
+  sort_dir?: 'asc' | 'desc'
 }

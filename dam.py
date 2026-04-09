@@ -46,9 +46,11 @@ from dam_config import (
 from platform_utils import spawn_background_process
 from storage_utils import resolve_archive_file
 
-INGEST_SCRIPT = DAM_ROOT / "card_ingest.py"
-SCANNER_SCRIPT = DAM_ROOT / "dam_scanner.py"
-TAGGER_SCRIPT = DAM_ROOT / "dam_tagger.py"
+# When frozen (PyInstaller), scripts are bundled in sys._MEIPASS, not in DAM_ROOT
+_SCRIPT_ROOT = Path(sys._MEIPASS) if getattr(sys, "frozen", False) else DAM_ROOT
+INGEST_SCRIPT = _SCRIPT_ROOT / "card_ingest.py"
+SCANNER_SCRIPT = _SCRIPT_ROOT / "dam_scanner.py"
+TAGGER_SCRIPT = _SCRIPT_ROOT / "dam_tagger.py"
 
 
 def run(cmd, description):
@@ -176,12 +178,53 @@ def _serve_gunicorn(bind, env):
     sys.exit(rc)
 
 
+class _DamBridge:
+    """JS ↔ Python bridge exposed as `window.pywebview.api` in the frontend."""
+
+    def __init__(self, win_ref):
+        self._win_ref = win_ref
+
+    def set_title(self, title):
+        """Called from JS to update the window title."""
+        w = self._win_ref()
+        if w:
+            w.set_title(title or "DAM")
+
+    def start_ingest(self, card_path=None):
+        """Trigger card ingest pipeline in a background thread."""
+        import threading
+
+        def _run():
+            cmd = [sys.executable, str(INGEST_SCRIPT)]
+            if card_path:
+                cmd.append(card_path)
+            subprocess.run(cmd, cwd=str(DAM_ROOT))
+            # After ingest, run scan + thumbs
+            subprocess.run([sys.executable, str(SCANNER_SCRIPT), "--no-thumbs"], cwd=str(DAM_ROOT))
+            subprocess.run([sys.executable, str(SCANNER_SCRIPT), "--no-scan"], cwd=str(DAM_ROOT))
+
+        threading.Thread(target=_run, daemon=True).start()
+        return {"status": "started"}
+
+    def pick_folder(self):
+        """Open a native folder picker dialog."""
+        w = self._win_ref()
+        if w:
+            result = w.create_file_dialog(
+                dialog_type=20,  # FOLDER_DIALOG
+            )
+            if result and len(result) > 0:
+                return result[0]
+        return None
+
+
 def _serve_window(port):
-    """Start Flask in a thread and open a pywebview window."""
+    """Start Flask in a thread and open a pywebview desktop window."""
     print("DAM ── Desktop application\n" + "-" * 50)
     import socket
     import threading
     import time
+    import weakref
 
     try:
         import webview
@@ -221,9 +264,41 @@ def _serve_window(port):
 
     url = f"http://127.0.0.1:{int_port}"
     print(f"  Server: {url}")
-    print(f"  Window: {WINDOW_SIZE[0]}x{WINDOW_SIZE[1]}")
 
-    webview.create_window("DAM", url, width=WINDOW_SIZE[0], height=WINDOW_SIZE[1])
+    # -- Native menu bar --
+    menu_items = [
+        webview.menu.Menu(
+            "File",
+            [
+                webview.menu.MenuAction("Ingest from Card...", lambda: _menu_ingest(win_ref)),
+                webview.menu.MenuSeparator(),
+                webview.menu.MenuAction("Close Window", lambda: _menu_close(win_ref)),
+            ],
+        ),
+        webview.menu.Menu(
+            "View",
+            [
+                webview.menu.MenuAction("Toggle Sidebar", lambda: _menu_js(win_ref, "document.querySelector('[data-sidebar-toggle]')?.click()")),
+                webview.menu.MenuSeparator(),
+                webview.menu.MenuAction("Zoom In", lambda: _menu_js(win_ref, "document.body.style.zoom = (parseFloat(document.body.style.zoom || 1) + 0.1).toString()")),
+                webview.menu.MenuAction("Zoom Out", lambda: _menu_js(win_ref, "document.body.style.zoom = (Math.max(0.5, parseFloat(document.body.style.zoom || 1) - 0.1)).toString()")),
+                webview.menu.MenuAction("Reset Zoom", lambda: _menu_js(win_ref, "document.body.style.zoom = '1'")),
+            ],
+        ),
+    ]
+
+    # Create window — start maximized for dual-monitor studio setup
+    window = webview.create_window(
+        "DAM",
+        url,
+        width=WINDOW_SIZE[0],
+        height=WINDOW_SIZE[1],
+        min_size=(800, 600),
+    )
+
+    win_ref = weakref.ref(window)
+    bridge = _DamBridge(win_ref)
+    window.expose(bridge.set_title, bridge.start_ingest, bridge.pick_folder)
 
     import platform
 
@@ -238,7 +313,35 @@ def _serve_window(port):
         except ImportError:
             pass
 
-    webview.start()
+    def _on_loaded():
+        """Maximize window after first page load."""
+        w = win_ref()
+        if w:
+            w.maximize()
+
+    window.events.loaded += _on_loaded
+    webview.start(menu=menu_items)
+
+
+def _menu_ingest(win_ref):
+    """Menu: trigger ingest."""
+    w = win_ref()
+    if w:
+        w.evaluate_js("window.pywebview?.api?.start_ingest()")
+
+
+def _menu_close(win_ref):
+    """Menu: close the window."""
+    w = win_ref()
+    if w:
+        w.destroy()
+
+
+def _menu_js(win_ref, js):
+    """Menu: run arbitrary JS in the window."""
+    w = win_ref()
+    if w:
+        w.evaluate_js(js)
 
 
 def _serve_flask_dev(port, env):
@@ -443,7 +546,7 @@ Commands:
   stats                                Show database statistics
   tag [--sample N] [--limit N]         AI tag images (burst stacking ON by default)
   search "query"                       Semantic search across tagged images
-  serve [--port 5000] [--window]       Start web API & open local desktop window
+  serve [--port 5001] [--window]       Start web API & open local desktop window
   export --dest PATH [--rating N]     Export picks to folder (--pick, --edit-status, --format, --dry-run)
   config [--edit] [--path]             Show, edit, or locate config file
 """

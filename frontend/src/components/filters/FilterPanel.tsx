@@ -74,6 +74,31 @@ export function FilterPanel() {
           ))}
         </div>
       </div>
+
+      {/* Date range */}
+      <div className="mb-3">
+        <label className="block text-[11px] text-[var(--text-dim)] mb-1 uppercase tracking-wider">
+          Date range
+        </label>
+        <div className="flex flex-col gap-1.5">
+          <input
+            type="date"
+            value={filters.date_from || ''}
+            min={data.date_min?.split('T')[0]}
+            max={filters.date_to || data.date_max?.split('T')[0]}
+            onChange={(e) => setFilter('date_from', e.target.value || undefined)}
+            className="w-full bg-[var(--bg3)] text-[var(--text)] border border-[var(--border)] rounded px-2 py-1 text-sm date-input-dark"
+          />
+          <input
+            type="date"
+            value={filters.date_to || ''}
+            min={filters.date_from || data.date_min?.split('T')[0]}
+            max={data.date_max?.split('T')[0]}
+            onChange={(e) => setFilter('date_to', e.target.value || undefined)}
+            className="w-full bg-[var(--bg3)] text-[var(--text)] border border-[var(--border)] rounded px-2 py-1 text-sm date-input-dark"
+          />
+        </div>
+      </div>
     </div>
   )
 }

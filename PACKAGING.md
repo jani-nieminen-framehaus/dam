@@ -1,82 +1,85 @@
-# Packaging and running DAM as an executable
+# Packaging and running DAM
 
-The project can be used as an **installable CLI + web app** and optionally built into a **standalone executable**.
+The project can be used as an **installable CLI + web app** and built into a **standalone macOS application**.
 
 ---
 
-## 1. Installable app (recommended)
-
-From the project root (`~/Documents/dam` or wherever you cloned it):
+## Quick start
 
 ```bash
-# Create a venv and install (use Python that has sqlite_vec — e.g. Homebrew Python on macOS)
+make run          # Launch desktop app (development, from source)
+make serve        # Web server only (localhost:5001)
+make test         # Run all tests
+make build        # Full build: frontend + DAM.app
+make clean        # Remove build artifacts
+```
+
+---
+
+## 1. Installable app (recommended for development)
+
+```bash
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -e ".[serve]"
 ```
 
-Then run any command via the single `dam` executable:
+Then run any command via `dam`:
 
 ```bash
-dam ingest
-dam scan
-dam thumbs
-dam stats
-dam tag --limit 100
-dam search "isolation"
-dam serve              # Web API + SPA (gunicorn if installed, else Flask)
-dam serve --port 5001
+dam ingest              # Detect card, copy, scan, thumbnail, AI tag
+dam scan                # Incremental scan of default volumes
+dam thumbs              # Generate missing thumbnails
+dam stats               # Show DB statistics
+dam tag --limit 100     # AI tag images
+dam search "isolation"  # Semantic search
+dam serve               # Web API + SPA (gunicorn or Flask)
+dam serve --window      # Desktop app (pywebview window)
+dam export --dest ~/Out # Export picks to folder
+dam config              # Show config
 ```
 
 **External requirements** (not installed by pip):
-
-- **exiftool** — for ingest and scanner (install via Homebrew: `brew install exiftool`).
-- **Ollama** (optional) — for `dam tag` and `dam search`; run Ollama locally with models `llava:34b`, `llama3.1:70b`, `nomic-embed-text`.
+- **exiftool** — `brew install exiftool`
+- **Ollama** (optional) — for `dam tag` and `dam search`
 
 ---
 
-## 2. Standalone executable (PyInstaller)
-
-You can build a single binary that bundles Python, Flask, and sqlite_vec. The result is a **CLI + server in one**; the web app is still a web app — you run `dam serve` and open the browser.
-
-### One-folder build (simplest, recommended)
+## 2. Standalone app (PyInstaller)
 
 ```bash
-pip install pyinstaller
-pyinstaller dam.spec
+make build
 ```
 
-The executable and Mac application bundle will be located in `dist/`.
+This builds the frontend (`static/`) and then runs PyInstaller, producing:
 
-- `dist/DAM.app`: The native macOS double-clickable application bundle. It contains everything needed to run the desktop window interface.
-- `dist/dam`: The standalone command-line executable bundle.
+- **`dist/DAM.app`** — macOS application bundle. Drag to `/Applications` or keep anywhere.
+- **`dist/dam`** — Standalone CLI executable.
 
-If using the `.app` bundle, simply place `DAM.app` into the `dam` folder containing your `static/`, `thumbs/`, and `dam.db` directories, and double-click to launch it seamlessly.
+### Data location
 
-For command line execution:
+DAM_ROOT is always `~/Documents/dam` regardless of where the `.app` lives. The database (`dam.db`), thumbnails (`thumbs/`), and web assets (`static/`) all live there. This means you can freely move `DAM.app` to `/Applications` and it will still work.
 
-```bash
-./dist/dam/dam ingest
-./dist/dam/dam serve
+To override DAM_ROOT, edit `~/.dam/config.json`:
+
+```json
+{
+  "dam_root": "/path/to/your/dam"
+}
 ```
 
-### One-file build
+### Rebuilding
 
-Possible but slower to start (extraction to a temp dir each run). You can duplicate the spec and set `EXE(..., onefile=True)`; data files (e.g. `static/`) must be handled via `--add-data` and `sys._MEIPASS` at runtime if you want them inside the bundle.
-
-### Notes for PyInstaller
-
-- **sqlite_vec**: Ensure the environment used to run PyInstaller has `sqlite-vec` installed; it will be bundled.
-- **exiftool / Ollama**: Not bundled; the user must install them separately.
-- **DAM_ROOT**: When running the frozen app, `DAM_ROOT` is set to the directory containing the executable, so keep the binary in the same folder as `static/`, `dam.db`, and (if desired) `thumbs/`.
+After code changes, rebuild with `make build`. The `make frontend` target rebuilds just the web UI; `make backend` rebuilds just the PyInstaller bundle.
 
 ---
 
 ## 3. Summary
 
-| Goal                         | Approach                    |
-|-----------------------------|-----------------------------|
-| Single command, no “compile” | `pip install -e ".[serve]"` → `dam` |
-| Web app + CLI in one place  | `dam serve` (same `dam` binary)     |
-| Standalone binary           | PyInstaller with `dam.spec`         |
-| External tools              | exiftool (required), Ollama (optional) |
+| Goal                         | Command                          |
+|-----------------------------|----------------------------------|
+| Dev: desktop app             | `make run`                       |
+| Dev: web server              | `make serve`                     |
+| Full build                   | `make build`                     |
+| Run tests                    | `make test`                      |
+| External tools               | exiftool (required), Ollama (optional) |

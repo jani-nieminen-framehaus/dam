@@ -6,7 +6,7 @@ export function useFilters() {
   return useQuery({
     queryKey: ['filters'],
     queryFn: () => apiFetch<FiltersResponse>('/filters'),
-    staleTime: 60_000, // Filters don't change often
+    staleTime: 60_000,
   })
 }
 
@@ -15,5 +15,13 @@ export function useStats() {
     queryKey: ['stats'],
     queryFn: () => apiFetch<StatsResponse>('/stats'),
     staleTime: 30_000,
+  })
+}
+
+export function useInstalledApps() {
+  return useQuery({
+    queryKey: ['apps'],
+    queryFn: () => apiFetch<{ apps: string[] }>('/apps'),
+    staleTime: 300_000, // Apps don't change often
   })
 }

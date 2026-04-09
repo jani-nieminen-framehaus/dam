@@ -1,4 +1,7 @@
+import { Star } from 'lucide-react'
 import { useUIStore } from '../../stores/useUIStore'
+import { useBulkPatch } from '../../api/images'
+import { useIngestStatus } from '../../api/ingest'
 
 interface Props {
   totalFiltered: number
@@ -6,20 +9,80 @@ interface Props {
 }
 
 export function StatusBar({ totalFiltered, totalLoaded }: Props) {
-  const { filters, selectedIds } = useUIStore()
+  const { filters, selectedIds, clearSelection } = useUIStore()
+  const bulkPatch = useBulkPatch()
+  const { data: ingest } = useIngestStatus()
   const activeFilters = Object.entries(filters).filter(([, v]) => v !== undefined)
+  const bulkMode = selectedIds.size > 1
+  const ids = [...selectedIds]
+
+  const doBulk = (patch: Record<string, unknown>) => {
+    bulkPatch.mutate({ ids, patch })
+  }
 
   return (
-    <div className="h-6 flex items-center px-3 gap-4 border-t border-[var(--border)] bg-[var(--bg2)] text-[11px] text-[var(--text-dim)] shrink-0">
+    <div className="h-7 flex items-center px-3 gap-3 border-t border-[var(--border)] bg-[var(--bg2)] text-[11px] text-[var(--text-dim)] shrink-0">
+      {/* Left: counts & filters */}
       <span>{totalFiltered.toLocaleString()} images</span>
       <span>{totalLoaded.toLocaleString()} loaded</span>
-      {selectedIds.size > 0 && (
-        <span className="text-[var(--sel)]">{selectedIds.size} selected</span>
-      )}
+
       {activeFilters.length > 0 && (
-        <span>
-          Filters: {activeFilters.map(([k, v]) => `${k}=${v}`).join(', ')}
-        </span>
+        <div className="flex items-center gap-1">
+          {activeFilters.map(([k, v]) => (
+            <span key={k} className="px-1.5 py-0 rounded bg-[var(--bg3)] text-[var(--text-mid)]">
+              {k}: {v}
+            </span>
+          ))}
+        </div>
+      )}
+
+      {/* Bulk action bar */}
+      {bulkMode && (
+        <div className="flex items-center gap-2 ml-2 pl-2 border-l border-[var(--border)]">
+          <span className="text-[var(--sel)] font-medium">{selectedIds.size} selected</span>
+          <button onClick={() => doBulk({ pick: 'pick' })}
+            className="px-1.5 py-0 rounded text-[10px] font-bold hover:bg-[var(--pick)] hover:text-black text-[var(--text-dim)]">
+            Pick
+          </button>
+          <button onClick={() => doBulk({ pick: 'reject' })}
+            className="px-1.5 py-0 rounded text-[10px] font-bold hover:bg-[var(--reject)] hover:text-white text-[var(--text-dim)]">
+            Reject
+          </button>
+          <div className="flex gap-0">
+            {[1, 2, 3, 4, 5].map((n) => (
+              <button key={n} onClick={() => doBulk({ rating: n })} title={`Rate ${n}`}>
+                <Star size={11} fill="none" stroke="var(--text-dim)" className="hover:stroke-[var(--accent)]" />
+              </button>
+            ))}
+          </div>
+          <button onClick={clearSelection}
+            className="px-1.5 py-0 rounded text-[10px] text-[var(--text-dim)] hover:text-white">
+            Clear
+          </button>
+        </div>
+      )}
+
+      {/* Single selection count (when not in bulk mode) */}
+      {selectedIds.size === 1 && (
+        <span className="text-[var(--sel)]">1 selected</span>
+      )}
+
+      <div className="flex-1" />
+
+      {/* Ingest progress */}
+      {ingest?.status === 'ingesting' && ingest.total && (
+        <div className="flex items-center gap-2">
+          <div className="w-24 h-1.5 rounded bg-[var(--bg)] overflow-hidden">
+            <div
+              className="h-full bg-[var(--accent)] transition-all"
+              style={{ width: `${((ingest.processed ?? 0) / ingest.total) * 100}%` }}
+            />
+          </div>
+          <span>
+            Ingesting {ingest.processed}/{ingest.total}
+            {ingest.current_file ? ` — ${ingest.current_file}` : ''}
+          </span>
+        </div>
       )}
     </div>
   )

@@ -66,16 +66,23 @@ TRIPTYCH_THEMES = {"care", "aging", "memory", "family", "illness", "passage of t
 # ── Ollama API ─────────────────────────────────────────────────────────────────
 
 
-def ollama_post(endpoint, payload, timeout=120, base_url=None):
-    """POST to Ollama API, return parsed JSON."""
+def ollama_post(endpoint, payload, timeout=120, base_url=None, max_retries=3):
+    """POST to Ollama API with retry, return parsed JSON."""
     url = f"{base_url or OLLAMA_BASE}{endpoint}"
     data = json.dumps(payload).encode()
     req = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json"}, method="POST")
-    try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            return json.loads(resp.read().decode())
-    except urllib.error.URLError as e:
-        raise RuntimeError(f"Ollama unreachable at {url}: {e}") from e
+
+    for attempt in range(max_retries):
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                return json.loads(resp.read().decode())
+        except urllib.error.URLError as e:
+            if attempt < max_retries - 1:
+                wait = 2 ** attempt
+                print(f"  Ollama retry {attempt + 1}/{max_retries} in {wait}s: {e}")
+                time.sleep(wait)
+            else:
+                raise RuntimeError(f"Ollama unreachable at {url} after {max_retries} attempts: {e}") from e
 
 
 def check_models():
