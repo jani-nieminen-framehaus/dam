@@ -5,6 +5,7 @@ import { useSearch } from './api/search'
 import { useUIStore } from './stores/useUIStore'
 import { Toolbar } from './components/layout/Toolbar'
 import { StatusBar } from './components/layout/StatusBar'
+import { IngestMonitor } from './components/layout/IngestMonitor'
 import { FilterPanel } from './components/filters/FilterPanel'
 import { ImageGrid } from './components/grid/ImageGrid'
 import { ImageList } from './components/list/ImageList'
@@ -70,6 +71,7 @@ export default function App() {
   <>
     <div className="h-full flex flex-col">
       <Toolbar totalFiltered={totalFiltered} />
+      <IngestMonitor />
 
       <div className="flex flex-1 min-h-0">
         {/* Sidebar — hidden during search */}

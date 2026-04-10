@@ -1,7 +1,6 @@
 import { Star } from 'lucide-react'
 import { useUIStore } from '../../stores/useUIStore'
 import { useBulkPatch } from '../../api/images'
-import { useIngestStatus } from '../../api/ingest'
 
 interface Props {
   totalFiltered: number
@@ -11,7 +10,6 @@ interface Props {
 export function StatusBar({ totalFiltered, totalLoaded }: Props) {
   const { filters, selectedIds, clearSelection } = useUIStore()
   const bulkPatch = useBulkPatch()
-  const { data: ingest } = useIngestStatus()
   const activeFilters = Object.entries(filters).filter(([, v]) => v !== undefined)
   const bulkMode = selectedIds.size > 1
   const ids = [...selectedIds]
@@ -68,22 +66,6 @@ export function StatusBar({ totalFiltered, totalLoaded }: Props) {
       )}
 
       <div className="flex-1" />
-
-      {/* Ingest progress */}
-      {ingest && ingest.status !== 'idle' && ingest.status !== 'error' && ingest.total && (
-        <div className="flex items-center gap-2">
-          <div className="w-24 h-1.5 rounded bg-[var(--bg)] overflow-hidden">
-            <div
-              className="h-full bg-[var(--accent)] transition-all"
-              style={{ width: `${((ingest.current ?? 0) / ingest.total) * 100}%` }}
-            />
-          </div>
-          <span>
-            Ingesting {ingest.current}/{ingest.total}
-            {ingest.current_path ? ` — ${ingest.current_path}` : ''}
-          </span>
-        </div>
-      )}
     </div>
   )
 }
