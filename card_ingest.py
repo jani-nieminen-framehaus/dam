@@ -127,14 +127,22 @@ def collect_files(card_path):
     return files
 
 
-def _update_ingest_status(progress_file, status, current=0, total=0):
+def _update_ingest_status(progress_file, status, current=0, total=0, current_path=None, dest_root=None):
     """Write ingest progress to status file (non-fatal on error)."""
     try:
         with open(progress_file, "w") as f:
             json.dump(
-                {"status": status, "current": current, "total": total, "timestamp": datetime.now().isoformat()}, f
+                {
+                    "status": status,
+                    "current": current,
+                    "total": total,
+                    "current_path": current_path,
+                    "dest_root": dest_root,
+                    "timestamp": datetime.now().isoformat(),
+                },
+                f,
             )
-    except Exception:
+    except OSError:
         pass
 
 
@@ -210,7 +218,7 @@ def _copy_date_group(date, date_files, dest_root, dry_run, progress_file, total,
 
     for fpath, fname in iterator:
         if not dry_run:
-            _update_ingest_status(progress_file, "copying", sum(counters.values()), total)
+            _update_ingest_status(progress_file, "copying", sum(counters.values()), total, current_path=f"{date}/{fname}", dest_root=str(dest_root))
 
         result = _copy_verified(fpath, dest_dir / str(fname), fname, dry_run)
         counters[result] += 1
@@ -244,7 +252,7 @@ def ingest(card_path, dry_run=False):
 
     _validate_dest(dest_root, dry_run, progress_file)
     if not dry_run:
-        _update_ingest_status(progress_file, "scanning", 0, 0)
+        _update_ingest_status(progress_file, "scanning", 0, 0, dest_root=str(dest_root))
 
     print(f"Source: {card_path}")
     print(f"Destination: {dest_root}")
@@ -272,7 +280,7 @@ def ingest(card_path, dry_run=False):
         )
 
     if not dry_run:
-        _update_ingest_status(progress_file, "idle", total, total)
+        _update_ingest_status(progress_file, "idle", total, total, dest_root=str(dest_root))
         if manifest_paths:
             _write_manifest(dest_root, manifest_paths)
 
