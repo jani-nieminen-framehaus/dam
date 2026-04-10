@@ -61,3 +61,31 @@ def test_write_ingest_phase_writes_status(tmp_path):
         assert "timestamp" in data
     finally:
         dam_config.INGEST_STATUS_FILE = orig
+
+
+def test_write_tagger_status_includes_all_fields(tmp_path):
+    """_write_tagger_status writes all expected fields to TAGGER_STATUS_FILE."""
+    import dam_config
+    orig = dam_config.TAGGER_STATUS_FILE
+    dam_config.TAGGER_STATUS_FILE = tmp_path / "tagger_status.json"
+
+    try:
+        from dam_tagger import _write_tagger_status
+        _write_tagger_status(
+            status="tagging",
+            current=3,
+            total=50,
+            current_path="2026-04-07/DSCF2601.JPG",
+            current_id=42,
+            last_keywords=["coastal", "fog"],
+        )
+        data = json.loads(dam_config.TAGGER_STATUS_FILE.read_text())
+        assert data["status"] == "tagging"
+        assert data["current"] == 3
+        assert data["total"] == 50
+        assert data["current_path"] == "2026-04-07/DSCF2601.JPG"
+        assert data["current_id"] == 42
+        assert data["last_keywords"] == ["coastal", "fog"]
+        assert "timestamp" in data
+    finally:
+        dam_config.TAGGER_STATUS_FILE = orig

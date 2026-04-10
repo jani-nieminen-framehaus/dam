@@ -43,6 +43,7 @@ from dam_config import (
     OLLAMA_BASE_TEXT,
     OLLAMA_BASE_VISION,
     SKIP_PATH_PATTERNS,
+    TAGGER_STATUS_FILE,
     TAGGER_WORKERS,
     TEXT_MODEL,
     THUMB_DIR,
@@ -306,6 +307,28 @@ def write_keywords(conn, image_id, keywords_dict):
             )
 
 
+def _write_tagger_status(status, current=0, total=0, current_path=None, current_id=None, last_keywords=None):
+    """Write tagger progress to tagger_status.json (non-fatal on error)."""
+    from datetime import datetime
+    import dam_config as _dc
+    try:
+        with open(_dc.TAGGER_STATUS_FILE, "w") as f:
+            json.dump(
+                {
+                    "status": status,
+                    "current": current,
+                    "total": total,
+                    "current_path": current_path,
+                    "current_id": current_id,
+                    "last_keywords": last_keywords or [],
+                    "timestamp": datetime.now().isoformat(),
+                },
+                f,
+            )
+    except OSError:
+        pass
+
+
 def load_ingest_manifest(path):
     """Load an ingest manifest for scoping tag runs to one batch."""
     with open(path, "r") as f:
@@ -355,7 +378,7 @@ def select_candidate_rows(conn, since=None, camera=None, retag=False, manifest_p
     lim_clause = f"LIMIT {sample or limit or 999999}"
     sql = f"""
         SELECT i.id, i.file_name, i.date_taken, i.camera_short,
-               i.file_path, i.triptych_leg
+               i.file_path, i.triptych_leg, i.relative_path
         FROM images i
         {where}
         {order}
@@ -526,6 +549,17 @@ def _tag_loop_sequential(conn, rows, burst_map, total, verbose):
         try:
             description, kw_dict, blob, t_vision, t_kw, t_embed = _tag_single_image(conn, row["id"], thumb_path, verbose)
             tagged += 1
+            all_kws = (
+                kw_dict.get("factual", []) + kw_dict.get("mood", []) + kw_dict.get("technical", [])
+            )
+            _write_tagger_status(
+                "tagging",
+                current=tagged,
+                total=total,
+                current_path=row.get("relative_path"),
+                current_id=row["id"],
+                last_keywords=all_kws[:6],
+            )
 
             siblings = burst_map.get(row["id"], [])
             if siblings:
@@ -586,6 +620,17 @@ def _tag_loop_parallel(conn, rows, burst_map, total, workers):
 
                 _write_tag_results(conn, image_id, description, kw_dict, blob)
                 tagged += 1
+                all_kws = (
+                    kw_dict.get("factual", []) + kw_dict.get("mood", []) + kw_dict.get("technical", [])
+                )
+                _write_tagger_status(
+                    "tagging",
+                    current=tagged,
+                    total=len(work),
+                    current_path=row.get("relative_path"),
+                    current_id=image_id,
+                    last_keywords=all_kws[:6],
+                )
 
                 siblings = burst_map.get(image_id, [])
                 if siblings:
@@ -627,6 +672,7 @@ def tag_images(args):
     conn, rows, burst_map, total_siblings = result
 
     total = len(rows)
+    _write_tagger_status("tagging", current=0, total=total)
     mode = "SAMPLE" if opts["sample"] else "FULL RUN"
     print(f"{'=' * 60}")
     print(f"DAM Tagger — {mode}")
@@ -639,7 +685,11 @@ def tag_images(args):
     print(f"{'=' * 60}\n")
 
     start = time.time()
-    tagged, errors = _tag_loop(conn, rows, burst_map, opts["verbose"], workers=opts["workers"])
+    try:
+        tagged, errors = _tag_loop(conn, rows, burst_map, opts["verbose"], workers=opts["workers"])
+    except Exception:
+        _write_tagger_status("error", current=0, total=total)
+        raise
     elapsed = time.time() - start
 
     total_with_siblings = tagged + sum(len(burst_map.get(r["id"], [])) for r in rows[:tagged])
@@ -652,6 +702,7 @@ def tag_images(args):
         print(f"Average: {elapsed / tagged:.1f}s per representative image")
     conn.close()
     wal_checkpoint()  # Truncate WAL after bulk writes
+    _write_tagger_status("done", current=tagged, total=total)
 
 
 # ── Semantic search ─────────────────────────────────────────────────────────────
