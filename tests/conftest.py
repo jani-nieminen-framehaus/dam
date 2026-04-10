@@ -30,12 +30,14 @@ def tmp_dam_root(tmp_path):
         "THUMB_DIR": dam_config.THUMB_DIR,
         "SPA_DIR": dam_config.SPA_DIR,
         "INGEST_STATUS_FILE": dam_config.INGEST_STATUS_FILE,
+        "TAGGER_STATUS_FILE": dam_config.TAGGER_STATUS_FILE,
     }
     dam_config.DAM_ROOT = dam_root
     dam_config.DB_PATH = db_path
     dam_config.THUMB_DIR = dam_root / "thumbs"
     dam_config.SPA_DIR = dam_root / "static"
     dam_config.INGEST_STATUS_FILE = dam_root / "ingest_status.json"
+    dam_config.TAGGER_STATUS_FILE = dam_root / "tagger_status.json"
 
     # Use the real production schema via dam_schema.init_db()
     from dam_schema import init_db

@@ -31,7 +31,7 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-from flask import Flask, abort, g, jsonify, request, send_from_directory
+from flask import Flask, abort, g, jsonify, request, send_file, send_from_directory
 
 from dam_config import (
     DEFAULT_VOLUMES,
@@ -42,6 +42,7 @@ from dam_config import (
     OLLAMA_BASE_EMBED,
     PAGE_SIZE,
     SPA_DIR,
+    TAGGER_STATUS_FILE,
     THUMB_DIR,
     VOLUME_ALIASES,
 )
@@ -223,6 +224,36 @@ def ingest_status():
             return jsonify(data)
     except Exception:
         return jsonify({"status": "error", "message": "Could not read status file"})
+
+
+@app.route("/api/tagger/status", methods=["GET"])
+def tagger_status():
+    f = TAGGER_STATUS_FILE
+    if not f.exists():
+        return jsonify({"status": "idle"})
+    try:
+        with open(f) as fh:
+            return jsonify(json.load(fh))
+    except Exception:
+        return jsonify({"status": "idle"})
+
+
+@app.route("/api/ingest/preview", methods=["GET"])
+def ingest_preview():
+    """Serve the JPEG currently being copied as a raw image (copy-phase live preview)."""
+    try:
+        with open(INGEST_STATUS_FILE) as fh:
+            data = json.load(fh)
+        current_path = data.get("current_path")
+        dest_root = data.get("dest_root")
+        if not current_path or not dest_root:
+            return ("", 204)
+        path = Path(dest_root) / current_path
+        if not path.exists() or path.suffix.lower() not in (".jpg", ".jpeg"):
+            return ("", 204)
+        return send_file(str(path), mimetype="image/jpeg")
+    except Exception:
+        return ("", 204)
 
 
 @app.route("/api/thumbs/<path:filename>")

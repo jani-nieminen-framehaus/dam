@@ -89,3 +89,33 @@ def test_write_tagger_status_includes_all_fields(tmp_path):
         assert "timestamp" in data
     finally:
         dam_config.TAGGER_STATUS_FILE = orig
+
+
+def test_tagger_status_returns_idle_when_no_file(tmp_dam_root, app_client):
+    """GET /api/tagger/status returns {status: idle} when tagger_status.json absent."""
+    import dam_config
+    dam_config.TAGGER_STATUS_FILE.unlink(missing_ok=True)
+    resp = app_client.get("/api/tagger/status")
+    assert resp.status_code == 200
+    assert resp.get_json()["status"] == "idle"
+
+
+def test_tagger_status_returns_file_contents(tmp_dam_root, app_client):
+    """GET /api/tagger/status returns tagger_status.json contents when present."""
+    import dam_config
+    dam_config.TAGGER_STATUS_FILE.write_text(
+        '{"status":"tagging","current":5,"total":100,"last_keywords":["fog"]}'
+    )
+    resp = app_client.get("/api/tagger/status")
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data["status"] == "tagging"
+    assert data["last_keywords"] == ["fog"]
+
+
+def test_ingest_preview_returns_204_when_no_current_path(tmp_dam_root, app_client):
+    """GET /api/ingest/preview returns 204 when ingest_status.json has no current_path."""
+    import dam_config
+    dam_config.INGEST_STATUS_FILE.write_text('{"status":"copying","current_path":null}')
+    resp = app_client.get("/api/ingest/preview")
+    assert resp.status_code == 204
