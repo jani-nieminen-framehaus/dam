@@ -156,6 +156,7 @@ SKIP_PATH_PATTERNS = _cfg["skip_path_patterns"]
 # Progress file path (derived, used by card_ingest and dam_api)
 INGEST_STATUS_FILE = DAM_ROOT / "ingest_status.json"
 LAST_INGEST_FILE = DAM_ROOT / "last_ingest.json"
+TAGGER_STATUS_FILE = DAM_ROOT / "tagger_status.json"
 
 
 def cmd_config(args):
