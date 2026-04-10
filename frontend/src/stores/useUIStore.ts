@@ -66,6 +66,10 @@ interface UIState {
   // Thumb size (grid only)
   thumbSize: number
   setThumbSize: (size: number) => void
+
+  // Ingest monitor
+  ingestMonitorCollapsed: boolean
+  toggleIngestMonitor: () => void
 }
 
 export const useUIStore = create<UIState>((set) => ({
@@ -142,4 +146,7 @@ export const useUIStore = create<UIState>((set) => ({
 
   thumbSize: 200,
   setThumbSize: (size) => set({ thumbSize: size }),
+
+  ingestMonitorCollapsed: false,
+  toggleIngestMonitor: () => set((s) => ({ ingestMonitorCollapsed: !s.ingestMonitorCollapsed })),
 }))
