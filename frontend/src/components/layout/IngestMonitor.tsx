@@ -47,8 +47,11 @@ export function IngestMonitor() {
     try {
       ;(window as any).pywebview?.api?.open_path?.(logPath)
     } catch {
-      navigator.clipboard.writeText(logPath)
-      addToast('Log path copied to clipboard', 'info')
+      navigator.clipboard.writeText(logPath).then(() => {
+        addToast('Log path copied to clipboard', 'info')
+      }).catch(() => {
+        addToast('Could not copy log path', 'error')
+      })
     }
   }
 
