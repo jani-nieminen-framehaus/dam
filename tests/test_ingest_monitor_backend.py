@@ -45,3 +45,19 @@ def test_update_ingest_status_current_path_defaults_to_none(tmp_path):
         assert data.get("current_path") is None
     finally:
         dam_config.INGEST_STATUS_FILE = orig
+
+
+def test_write_ingest_phase_writes_status(tmp_path):
+    """_write_ingest_phase writes the given status string to INGEST_STATUS_FILE."""
+    import dam_config
+    orig = dam_config.INGEST_STATUS_FILE
+    dam_config.INGEST_STATUS_FILE = tmp_path / "ingest_status.json"
+
+    try:
+        from dam_scanner import _write_ingest_phase
+        _write_ingest_phase("scanning_db")
+        data = json.loads(dam_config.INGEST_STATUS_FILE.read_text())
+        assert data["status"] == "scanning_db"
+        assert "timestamp" in data
+    finally:
+        dam_config.INGEST_STATUS_FILE = orig

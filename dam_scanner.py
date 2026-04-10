@@ -32,7 +32,7 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-from dam_config import BATCH_SIZE, DB_PATH, DEFAULT_VOLUMES, IGNORE_VOLUMES, THUMB_DIR, THUMB_WORKERS, VOLUME_ALIASES
+from dam_config import BATCH_SIZE, DB_PATH, DEFAULT_VOLUMES, IGNORE_VOLUMES, INGEST_STATUS_FILE, THUMB_DIR, THUMB_WORKERS, VOLUME_ALIASES
 from dam_schema import init_db
 from dam_db import wal_checkpoint
 from storage_utils import (
@@ -42,6 +42,16 @@ from storage_utils import (
     resolve_archive_file,
     resolve_scan_roots,
 )
+
+def _write_ingest_phase(status: str) -> None:
+    """Write a pipeline phase marker to ingest_status.json (best effort)."""
+    import dam_config
+    try:
+        with open(dam_config.INGEST_STATUS_FILE, "w") as f:
+            json.dump({"status": status, "timestamp": datetime.now().isoformat()}, f)
+    except OSError:
+        pass
+
 
 # Primary files — these define an image group
 RAW_EXTENSIONS = {".rw2", ".nef", ".raf", ".arw", ".cr3", ".dng", ".orf"}
@@ -852,9 +862,11 @@ def scan(volumes, rescan=False, dry_run=False, extract_thumbs=True):
         conn.close()
         return
 
+    _write_ingest_phase("scanning_db")
     _index_batches(conn, to_scan, volumes)
 
     if extract_thumbs:
+        _write_ingest_phase("thumbs")
         _run_thumbnail_pass(conn)
 
     show_stats(conn)
