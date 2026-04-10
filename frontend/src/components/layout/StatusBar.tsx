@@ -70,17 +70,17 @@ export function StatusBar({ totalFiltered, totalLoaded }: Props) {
       <div className="flex-1" />
 
       {/* Ingest progress */}
-      {ingest?.status === 'ingesting' && ingest.total && (
+      {ingest && ingest.status !== 'idle' && ingest.status !== 'error' && ingest.total && (
         <div className="flex items-center gap-2">
           <div className="w-24 h-1.5 rounded bg-[var(--bg)] overflow-hidden">
             <div
               className="h-full bg-[var(--accent)] transition-all"
-              style={{ width: `${((ingest.processed ?? 0) / ingest.total) * 100}%` }}
+              style={{ width: `${((ingest.current ?? 0) / ingest.total) * 100}%` }}
             />
           </div>
           <span>
-            Ingesting {ingest.processed}/{ingest.total}
-            {ingest.current_file ? ` — ${ingest.current_file}` : ''}
+            Ingesting {ingest.current}/{ingest.total}
+            {ingest.current_path ? ` — ${ingest.current_path}` : ''}
           </span>
         </div>
       )}
