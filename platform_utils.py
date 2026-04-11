@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import os
 import re
 import shutil
@@ -130,6 +131,24 @@ def notify_desktop(title: str, message: str) -> None:
             ["osascript", "-e", f'display notification "{message}" with title "{title}"'],
             timeout=5,
             check=False,
+        )
+
+
+def launch_ingest_monitor(vol_name: str) -> None:
+    """Launch the PySide6 ingest monitor as a detached background subprocess.
+
+    dest_root is NOT passed here — the monitor reads it from ingest_status.json
+    once card_ingest.py starts writing it. No-op on Linux or if script is absent.
+    """
+    if sys.platform not in ("darwin", "win32"):
+        return
+    monitor_script = Path(__file__).parent / "ingest_monitor.py"
+    if not monitor_script.exists():
+        return
+    with contextlib.suppress(Exception):
+        subprocess.Popen(
+            [sys.executable, str(monitor_script), "--vol", vol_name],
+            start_new_session=True,
         )
 
 

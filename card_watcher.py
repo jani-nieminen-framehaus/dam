@@ -8,7 +8,6 @@ fires: dam ingest → scan → thumbnails → AI tag (background).
 Logs to ~/Documents/dam/card_watcher.log
 """
 
-import contextlib
 import logging
 import os
 import subprocess
@@ -17,7 +16,7 @@ import time
 from pathlib import Path
 
 from dam_config import DAM_ROOT, IGNORE_VOLUMES, INGEST_TIMEOUT, POLL_INTERVAL
-from platform_utils import find_dcim_mounts, notify_desktop, volume_label
+from platform_utils import find_dcim_mounts, launch_ingest_monitor, volume_label
 
 DAM_SCRIPT = DAM_ROOT / "dam.py"
 PYTHON = sys.executable
@@ -50,12 +49,6 @@ def get_mounted_cards():
     return cards
 
 
-def notify(title, message):
-    """Best-effort desktop notification."""
-    with contextlib.suppress(Exception):
-        notify_desktop(title, message)
-
-
 def run_ingest(card_path):
     """Run full DAM ingest pipeline for a detected card.
 
@@ -63,9 +56,8 @@ def run_ingest(card_path):
     """
     vol_name = Path(card_path).name
     log.info(f"═══ CARD DETECTED: {vol_name} ═══")
-    notify("DAM", f"Card detected: {vol_name} — starting ingest")
+    launch_ingest_monitor(vol_name)
 
-    # LaunchAgents get minimal PATH — ensure homebrew tools are available
     env = os.environ.copy()
     if sys.platform == "darwin":
         env["PATH"] = "/opt/homebrew/bin:/opt/homebrew/sbin:" + env.get("PATH", "/usr/bin:/bin")
@@ -84,13 +76,10 @@ def run_ingest(card_path):
 
         if result.returncode == 0:
             log.info(f"Ingest complete in {elapsed:.0f}s")
-            notify("DAM", f"Ingest done: {vol_name} ({elapsed:.0f}s)")
         else:
             log.error(f"Ingest FAILED (exit {result.returncode})")
             log.error(result.stderr[-500:] if result.stderr else "no stderr")
-            notify("DAM", f"Ingest FAILED: {vol_name}")
 
-        # Log stdout summary (last 20 lines)
         if result.stdout:
             for line in result.stdout.strip().split("\n")[-20:]:
                 log.info(f"  {line}")
@@ -99,11 +88,9 @@ def run_ingest(card_path):
 
     except subprocess.TimeoutExpired:
         log.error("Ingest TIMED OUT after 2 hours")
-        notify("DAM", f"Ingest timed out: {vol_name}")
         return False
     except Exception as e:
         log.error(f"Ingest error: {e}")
-        notify("DAM", f"Ingest error: {vol_name}")
         return False
 
 
