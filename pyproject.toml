@@ -11,6 +11,7 @@ dependencies = [
     "flask>=3.0",
     "sqlite-vec>=0.1.0",
     "pywebview>=5.0.0",
+    "PySide6>=6.6",
     "tqdm>=4.60",
     "Pillow>=10.0",
 ]
