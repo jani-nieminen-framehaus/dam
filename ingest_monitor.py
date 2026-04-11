@@ -11,8 +11,22 @@ Usage:
 """
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
+
+# Must happen before any PySide6 import — Qt can't locate libqcocoa when launched
+# as a detached subprocess unless the plugin path is set explicitly.
+if "QT_QPA_PLATFORM_PLUGIN_PATH" not in os.environ:
+    try:
+        import importlib.util
+        _spec = importlib.util.find_spec("PySide6")
+        if _spec and _spec.origin:
+            _qt_plugins = Path(_spec.origin).parent / "Qt" / "plugins"
+            if _qt_plugins.exists():
+                os.environ["QT_QPA_PLATFORM_PLUGIN_PATH"] = str(_qt_plugins)
+    except Exception:
+        pass
 
 from PySide6.QtCore import QEasingCurve, QPropertyAnimation, QSize, Qt, QTimer, QUrl
 from PySide6.QtGui import QDesktopServices, QPixmap
