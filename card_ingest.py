@@ -252,7 +252,7 @@ def ingest(card_path, dry_run=False):
 
     _validate_dest(dest_root, dry_run, progress_file)
     if not dry_run:
-        _update_ingest_status(progress_file, "scanning", 0, 0, dest_root=str(dest_root))
+        _update_ingest_status(progress_file, "scanning_db", 0, 0, dest_root=str(dest_root))
 
     print(f"Source: {card_path}")
     print(f"Destination: {dest_root}")

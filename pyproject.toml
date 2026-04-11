@@ -38,6 +38,7 @@ py-modules = [
     "dam_tagger",
     "card_ingest",
     "card_watcher",
+    "ingest_monitor",
     "platform_utils",
     "storage_utils",
 ]

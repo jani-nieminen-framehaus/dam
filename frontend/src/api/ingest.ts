@@ -62,6 +62,7 @@ export function useTagStatus() {
       wasTagging.current = false
       qc.invalidateQueries({ queryKey: ['images'] })
       qc.invalidateQueries({ queryKey: ['filters'] })
+      qc.invalidateQueries({ queryKey: ['stats'] })
     }
   }, [query.data?.status, qc])
 

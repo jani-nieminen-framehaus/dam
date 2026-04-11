@@ -240,6 +240,12 @@ class IngestMonitorWindow(QDialog):
             self.setWindowTitle(f"DAM \u2014 Done \u2713  ({self.vol_name})")
         elif ingest_s == "error" or tagger_s == "error":
             self.setWindowTitle(f"DAM \u2014 Failed  ({self.vol_name})")
+            self.setStyleSheet(
+                f"QDialog {{ background: {REJECT}; color: {TEXT}; }}"
+                f"QProgressBar {{ background: {BG3}; border: none; border-radius: 3px; }}"
+                f"QProgressBar::chunk {{ background: {BG3}; border-radius: 3px; }}"
+            )
+            self.timer.stop()
 
         self._update_phase_dots(ingest_s, tagger_s)
 

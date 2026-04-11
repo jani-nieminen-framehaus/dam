@@ -27,7 +27,7 @@ export function IngestMonitor() {
   const ingestS = ingest?.status ?? 'idle'
   const taggerS = tagger?.status ?? 'idle'
 
-  const isActive = ingestS !== 'idle' || taggerS === 'tagging'
+  const isActive = ingestS !== 'idle' || taggerS === 'tagging' || taggerS === 'done'
   if (!isActive) return null
 
   const active = phaseIndex(ingestS, taggerS)
