@@ -556,7 +556,7 @@ def _tag_loop_sequential(conn, rows, burst_map, total, verbose):
                 "tagging",
                 current=tagged,
                 total=total,
-                current_path=row.get("relative_path"),
+                current_path=row["relative_path"],
                 current_id=row["id"],
                 last_keywords=all_kws[:6],
             )
@@ -627,7 +627,7 @@ def _tag_loop_parallel(conn, rows, burst_map, total, workers):
                     "tagging",
                     current=tagged,
                     total=len(work),
-                    current_path=row.get("relative_path"),
+                    current_path=row["relative_path"],
                     current_id=image_id,
                     last_keywords=all_kws[:6],
                 )
