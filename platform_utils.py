@@ -145,10 +145,20 @@ def launch_ingest_monitor(vol_name: str) -> None:
     monitor_script = Path(__file__).parent / "ingest_monitor.py"
     if not monitor_script.exists():
         return
+    env = os.environ.copy()
+    # Qt can't locate its platform plugins when launched as a detached subprocess.
+    # Resolve the path from the running PySide6 installation and inject it explicitly.
+    with contextlib.suppress(Exception):
+        import PySide6 as _pyside6
+        qt_plugins = Path(_pyside6.__file__).parent / "Qt" / "plugins"
+        if qt_plugins.exists():
+            env["QT_QPA_PLATFORM_PLUGIN_PATH"] = str(qt_plugins)
+
     with contextlib.suppress(Exception):
         subprocess.Popen(
             [sys.executable, str(monitor_script), "--vol", vol_name],
             start_new_session=True,
+            env=env,
         )
 
 
