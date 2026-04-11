@@ -134,6 +134,27 @@ def notify_desktop(title: str, message: str) -> None:
         )
 
 
+def _find_monitor_python() -> str:
+    """Find a Python interpreter that can run PySide6 GUI apps on macOS.
+
+    uv's standalone CPython builds fail to load Qt's cocoa platform plugin.
+    Prefer a Homebrew or framework Python which works correctly.
+    Returns the path to the best available interpreter.
+    """
+    candidates = [
+        # Dedicated monitor venv (created once via: python3 -m venv ~/.local/dam-monitor
+        #                                              && pip install PySide6)
+        str(Path.home() / ".local" / "dam-monitor" / "bin" / "python3"),
+        "/opt/homebrew/bin/python3",
+        "/usr/local/bin/python3",
+        sys.executable,
+    ]
+    for candidate in candidates:
+        if Path(candidate).exists():
+            return candidate
+    return sys.executable
+
+
 def launch_ingest_monitor(vol_name: str) -> None:
     """Launch the PySide6 ingest monitor as a detached background subprocess.
 
@@ -145,20 +166,12 @@ def launch_ingest_monitor(vol_name: str) -> None:
     monitor_script = Path(__file__).parent / "ingest_monitor.py"
     if not monitor_script.exists():
         return
-    env = os.environ.copy()
-    # Qt can't locate its platform plugins when launched as a detached subprocess.
-    # Resolve the path from the running PySide6 installation and inject it explicitly.
-    with contextlib.suppress(Exception):
-        import PySide6 as _pyside6
-        qt_plugins = Path(_pyside6.__file__).parent / "Qt" / "plugins"
-        if qt_plugins.exists():
-            env["QT_QPA_PLATFORM_PLUGIN_PATH"] = str(qt_plugins)
 
+    python = _find_monitor_python()
     with contextlib.suppress(Exception):
         subprocess.Popen(
-            [sys.executable, str(monitor_script), "--vol", vol_name],
+            [python, str(monitor_script), "--vol", vol_name],
             start_new_session=True,
-            env=env,
         )
 
 
