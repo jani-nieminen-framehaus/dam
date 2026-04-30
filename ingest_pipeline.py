@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from dam_config import DAM_ROOT, LAST_INGEST_FILE
+from dam_scanner import run_preview_backfill
 from platform_utils import spawn_background_process
 
 _SCRIPT_ROOT = Path(sys._MEIPASS) if getattr(sys, "frozen", False) else DAM_ROOT
@@ -76,7 +77,7 @@ def _remaining_timeout(total_timeout: float | None, start: float, cmd: list[str]
 def launch_background_tagger(*, python: str | None = None, announce: Announce | None = _default_announce) -> None:
     """Launch AI tagging for the latest ingest manifest in a detached process."""
     if announce:
-        announce("\nDAM ── STEP 4/4 — AI Tagging (background)\n" + "-" * 50)
+        announce("\nDAM ── STEP 5/5 — AI Tagging (background)\n" + "-" * 50)
     tag_log = DAM_ROOT / "tagger_run.log"
     tag_cmd = [python or sys.executable, str(TAGGER_SCRIPT)]
     if LAST_INGEST_FILE.exists():
@@ -113,7 +114,7 @@ def run_ingest_pipeline(
 
     proc = _run_step(
         ingest_cmd,
-        "STEP 1/4 — Card Ingest",
+        "STEP 1/5 — Card Ingest",
         capture_output=capture_output,
         timeout=_remaining_timeout(timeout, start, ingest_cmd),
         cwd=run_cwd,
@@ -137,7 +138,7 @@ def run_ingest_pipeline(
     scan_cmd = [py, str(SCANNER_SCRIPT), "--no-thumbs"]
     proc = _run_step(
         scan_cmd,
-        "STEP 2/4 — Scanning New Files",
+        "STEP 2/5 — Scanning New Files",
         capture_output=capture_output,
         timeout=_remaining_timeout(timeout, start, scan_cmd),
         cwd=run_cwd,
@@ -155,7 +156,7 @@ def run_ingest_pipeline(
     thumbs_cmd = [py, str(SCANNER_SCRIPT), "--no-scan"]
     proc = _run_step(
         thumbs_cmd,
-        "STEP 3/4 — Generating Thumbnails for New Files",
+        "STEP 3/5 — Generating Thumbnails for New Files",
         capture_output=capture_output,
         timeout=_remaining_timeout(timeout, start, thumbs_cmd),
         cwd=run_cwd,
@@ -169,6 +170,11 @@ def run_ingest_pipeline(
         result.returncode = proc.returncode
         result.elapsed = time.time() - start
         return result
+
+    if announce:
+        announce("\nDAM ── STEP 4/5 — Generating Lightbox Previews\n" + "-" * 50)
+    preview_dir = DAM_ROOT / "previews"
+    run_preview_backfill(preview_dir)
 
     if no_tag:
         if announce:
