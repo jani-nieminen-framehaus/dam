@@ -125,7 +125,8 @@ def test_keyword_parsing_valid_json(monkeypatch):
     }
     monkeypatch.setattr("dam_tagger.ollama_post", lambda *a, **kw: valid_response)
 
-    result = text_extract_keywords("A man stands by a window.")
+    desc = "A man stands by a window in isolation, aging quietly."
+    result = text_extract_keywords(desc)
     assert "man" in result["factual"]
     assert "window" in result["factual"]
     assert "isolation" in result["mood"]
@@ -139,7 +140,9 @@ def test_keyword_parsing_markdown_fences(monkeypatch):
     }
     monkeypatch.setattr("dam_tagger.ollama_post", lambda *a, **kw: noisy_response)
 
-    result = text_extract_keywords("A chair in a room.")
+    # 'soft lighting' is technical vocab (always allowed); 'calm' must be in description.
+    desc = "A chair stands in a calm corner of the room."
+    result = text_extract_keywords(desc)
     assert "chair" in result["factual"]
     assert "calm" in result["mood"]
     assert "soft lighting" in result["technical"]
@@ -162,7 +165,9 @@ def test_keyword_parsing_semicolon_separator(monkeypatch):
         lambda *a, **kw: {"response": "chair; window; backlit; calm"},
     )
 
-    result = text_extract_keywords("A chair by a window.")
+    # 'backlit' is technical vocab (always allowed); 'calm' must be in description.
+    desc = "A chair by a window in a calm room."
+    result = text_extract_keywords(desc)
     assert "chair" in result["factual"]
     assert "window" in result["factual"]
     assert "calm" in result["mood"]
@@ -186,6 +191,73 @@ def test_keyword_parsing_drops_sentence_length_entries(monkeypatch):
     assert not any("describing" in kw for kw in all_kws)
 
 
+def test_keyword_grounding_drops_unjustified_mood(monkeypatch):
+    """Mood keywords not present in the description must be dropped (overtrain guard)."""
+    monkeypatch.setattr(
+        "dam_tagger.ollama_post",
+        lambda *a, **kw: {"response": "ice cream cone, neglect, smartphone"},
+    )
+
+    desc = "A partially eaten ice cream cone rests on a crumpled napkin, with a smartphone nearby."
+    result = text_extract_keywords(desc)
+
+    all_kws = result["factual"] + result["mood"] + result["technical"]
+    assert "ice cream cone" in all_kws
+    assert "smartphone" in all_kws
+    # "neglect" is hallucinated — never in the description
+    assert "neglect" not in all_kws
+    assert result["triptych_relevant"] is False
+
+
+def test_keyword_grounding_keeps_technical_vocabulary(monkeypatch):
+    """Technical keywords (controlled vocab) bypass the description check."""
+    monkeypatch.setattr(
+        "dam_tagger.ollama_post",
+        lambda *a, **kw: {"response": "chair, backlit, soft lighting"},
+    )
+
+    # Technical terms aren't required to appear in the description.
+    desc = "A wooden chair stands in a corner."
+    result = text_extract_keywords(desc)
+
+    assert "chair" in result["factual"]
+    assert "backlit" in result["technical"]
+    assert "soft lighting" in result["technical"]
+
+
+def test_keyword_grounding_multitoken_token_match(monkeypatch):
+    """Multi-word keywords pass when each significant token appears (handles spacing variants)."""
+    monkeypatch.setattr(
+        "dam_tagger.ollama_post",
+        lambda *a, **kw: {"response": "smart phone, ice cream cone"},
+    )
+
+    # Description writes 'smartphone' (one word); keyword is 'smart phone' (two)
+    desc = "A smartphone lies on the table next to an ice cream cone."
+    result = text_extract_keywords(desc)
+
+    all_kws = result["factual"] + result["mood"] + result["technical"]
+    assert "smart phone" in all_kws  # both tokens substring-match into 'smartphone'
+    assert "ice cream cone" in all_kws
+
+
+def test_keyword_grounding_drops_isolation_desperation(monkeypatch):
+    """The user's specific failure modes — drama tags on benign scenes."""
+    monkeypatch.setattr(
+        "dam_tagger.ollama_post",
+        lambda *a, **kw: {"response": "isolation, desperation, party hat, dog"},
+    )
+
+    desc = "A young child stands behind a small table; a dog wears a party hat. Adults sit nearby observing."
+    result = text_extract_keywords(desc)
+
+    all_kws = result["factual"] + result["mood"] + result["technical"]
+    assert "party hat" in all_kws
+    assert "dog" in all_kws
+    assert "isolation" not in all_kws
+    assert "desperation" not in all_kws
+
+
 def test_keyword_parsing_real_dam_tagger_garbage(monkeypatch):
     """Real-world dam-tagger output with semicolons, double-dots, and sentence fragments."""
     monkeypatch.setattr(
@@ -195,7 +267,8 @@ def test_keyword_parsing_real_dam_tagger_garbage(monkeypatch):
         },
     )
 
-    result = text_extract_keywords("A woman on a sofa.")
+    desc = "A dimly lit room with curtains over a window. A sofa sits against the wall."
+    result = text_extract_keywords(desc)
     all_kws = result["factual"] + result["mood"] + result["technical"]
     # Short, clean fragments survive
     assert "dimly lit room" in all_kws
