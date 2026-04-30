@@ -191,6 +191,23 @@ def test_keyword_parsing_drops_sentence_length_entries(monkeypatch):
     assert not any("describing" in kw for kw in all_kws)
 
 
+def test_text_extract_caps_num_ctx(monkeypatch):
+    """Text extraction passes a small num_ctx — don't waste KV cache on dam-tagger's 32k default."""
+    captured = {}
+
+    def fake_post(endpoint, payload, **kw):
+        captured["payload"] = payload
+        return {"response": "chair"}
+
+    monkeypatch.setattr("dam_tagger.ollama_post", fake_post)
+
+    text_extract_keywords("A chair stands.")
+
+    num_ctx = captured["payload"]["options"].get("num_ctx")
+    assert num_ctx is not None, "num_ctx must be passed to bound KV cache allocation"
+    assert num_ctx <= 4096, f"num_ctx {num_ctx} too large for tagger prompt (<500 tokens)"
+
+
 def test_keyword_grounding_drops_unjustified_mood(monkeypatch):
     """Mood keywords not present in the description must be dropped (overtrain guard)."""
     monkeypatch.setattr(
