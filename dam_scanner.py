@@ -639,6 +639,77 @@ def generate_preview(image_id, file_path, preview_dir, max_dim=PREVIEW_MAX_DIM):
     return None
 
 
+def run_preview_backfill(preview_dir, max_dim=PREVIEW_MAX_DIM):
+    """Generate 2048px previews for all images missing one.
+
+    Returns dict with stats: total, generated, skipped, failed, elapsed.
+    """
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    conn = init_db()
+    rows = conn.execute(
+        "SELECT id, file_path, volume, relative_path FROM images"
+    ).fetchall()
+    conn.close()
+
+    preview_dir.mkdir(parents=True, exist_ok=True)
+
+    to_generate = []
+    skipped = 0
+    for row in rows:
+        preview_path = preview_dir / f"{row['id']}.jpg"
+        if _is_usable_jpeg(preview_path):
+            skipped += 1
+            continue
+        resolved = resolve_archive_file(
+            row["file_path"], row["volume"], row["relative_path"],
+            DEFAULT_VOLUMES, IGNORE_VOLUMES, VOLUME_ALIASES,
+        )
+        if resolved is None:
+            continue  # Volume not mounted — skip silently
+        to_generate.append((row["id"], str(resolved)))
+
+    total = len(to_generate)
+    if total == 0:
+        print(f"  All previews up to date ({skipped:,} cached).")
+        return {"total": len(rows), "generated": 0, "skipped": skipped, "failed": 0, "elapsed": 0.0}
+
+    print(f"\nGenerating {total:,} previews ({skipped:,} cached, {THUMB_WORKERS} workers)...")
+    start = time.time()
+    generated = 0
+    failed = 0
+
+    try:
+        from tqdm import tqdm
+        progress = tqdm(total=total, unit="img", desc="Previews")
+    except ImportError:
+        progress = None
+
+    with ThreadPoolExecutor(max_workers=THUMB_WORKERS) as executor:
+        futures = {
+            executor.submit(generate_preview, img_id, fpath, preview_dir, max_dim): img_id
+            for img_id, fpath in to_generate
+        }
+        for future in as_completed(futures):
+            try:
+                result = future.result()
+                if result is not None:
+                    generated += 1
+                else:
+                    failed += 1
+            except Exception:
+                failed += 1
+            if progress:
+                progress.update(1)
+
+    if progress:
+        progress.close()
+
+    elapsed = time.time() - start
+    print(f"  Done: {generated:,} generated, {failed:,} failed in {elapsed:.1f}s")
+    return {"total": len(rows), "generated": generated, "skipped": skipped, "failed": failed, "elapsed": elapsed}
+
+
 def _match_root_for_path(file_path, roots):
     path = Path(file_path).resolve()
     best = None

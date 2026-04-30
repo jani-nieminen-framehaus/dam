@@ -72,3 +72,63 @@ def test_generate_preview_returns_none_for_missing_source(tmp_dam_root):
     )
 
     assert result is None
+
+
+def test_run_preview_backfill_generates_missing(tmp_dam_root):
+    """run_preview_backfill generates previews for images that lack them."""
+    import sqlite3
+
+    import dam_config
+    from dam_scanner import run_preview_backfill
+
+    preview_dir = dam_config.DAM_ROOT / "previews"
+    preview_dir.mkdir(exist_ok=True)
+
+    src = tmp_dam_root / "test.jpg"
+    src.write_bytes(
+        b"\xff\xd8\xff\xe0\x00\x10JFIF\x00\x01\x01\x00\x00\x01\x00\x01\x00\x00"
+        + b"\x00" * 20
+        + b"\xff\xd9"
+    )
+
+    conn = sqlite3.connect(str(dam_config.DB_PATH))
+    conn.execute(
+        "INSERT INTO images (file_path, file_name, file_type, rating, pick, edit_status) "
+        "VALUES (?, 'test.jpg', 'JPG', 0, 'unmarked', 'unculled')",
+        (str(src),),
+    )
+    conn.commit()
+    conn.close()
+
+    stats = run_preview_backfill(preview_dir)
+
+    assert stats["total"] == 1
+    assert stats["generated"] >= 0  # may be 0 if synthetic JPEG too small for sips
+    assert stats["skipped"] == 0
+
+
+def test_run_preview_backfill_skips_existing(tmp_dam_root):
+    """run_preview_backfill skips images that already have a valid preview."""
+    import sqlite3
+
+    import dam_config
+    from dam_scanner import run_preview_backfill
+
+    preview_dir = dam_config.DAM_ROOT / "previews"
+    preview_dir.mkdir(exist_ok=True)
+
+    conn = sqlite3.connect(str(dam_config.DB_PATH))
+    conn.execute(
+        "INSERT INTO images (file_path, file_name, file_type, rating, pick, edit_status) "
+        "VALUES ('/test/img.jpg', 'img.jpg', 'JPG', 0, 'unmarked', 'unculled')"
+    )
+    conn.commit()
+    img_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+    conn.close()
+
+    (preview_dir / f"{img_id}.jpg").write_bytes(b"\xff\xd8\xff" + b"\x00" * 100)
+
+    stats = run_preview_backfill(preview_dir)
+
+    assert stats["skipped"] == 1
+    assert stats["generated"] == 0

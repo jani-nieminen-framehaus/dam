@@ -75,6 +75,12 @@ def cmd_thumbs(_args):
     sys.exit(run([sys.executable, str(SCANNER_SCRIPT), "--no-scan"], "Generating missing thumbnails"))
 
 
+def cmd_previews(_args):
+    from dam_scanner import run_preview_backfill
+    preview_dir = DAM_ROOT / "previews"
+    sys.exit(0 if run_preview_backfill(preview_dir)["failed"] == 0 else 1)
+
+
 def cmd_stats(_args):
     sys.exit(run([sys.executable, str(SCANNER_SCRIPT), "--stats"], "DAM Stats"))
 
@@ -492,6 +498,7 @@ COMMANDS = {
     "ingest": cmd_ingest,
     "scan": cmd_scan,
     "thumbs": cmd_thumbs,
+    "previews": cmd_previews,
     "stats": cmd_stats,
     "tag": cmd_tag,
     "search": cmd_search,
@@ -507,6 +514,7 @@ Commands:
   ingest [path] [--dry-run] [--no-tag] Copy card, scan, thumbnails, AI tag
   scan [path] [--rescan]               Scan volumes (incremental by default)
   thumbs                               Generate missing thumbnails
+  previews                             Generate missing 2048px lightbox previews
   stats                                Show database statistics
   tag [--sample N] [--limit N]         AI tag images (burst stacking ON by default)
   search "query"                       Semantic search across tagged images
