@@ -14,12 +14,12 @@ export function useImages(filters: FilterState) {
         ...filters,
       }
       if (pageParam) {
-        params.cursor_date = pageParam.date
+        params.cursor_value = pageParam.value
         params.cursor_id = pageParam.id
       }
       return apiFetch<ImagesResponse>(`/images${buildQueryString(params)}`)
     },
-    initialPageParam: null as { date: string; id: number } | null,
+    initialPageParam: null as { value: string | number; id: number } | null,
     getNextPageParam: (lastPage) => lastPage.next_cursor ?? undefined,
   })
 }
@@ -113,6 +113,19 @@ export function useOpenJpeg() {
       return apiFetch<{ success: boolean; action: string }>(`/images/${id}/open_jpeg`, {
         method: 'POST',
       })
+    },
+  })
+}
+
+export function useReveal() {
+  return useMutation({
+    mutationFn: async (id: number) => {
+      return apiFetch<{ success: boolean; action: string }>(`/images/${id}/reveal`, {
+        method: 'POST',
+      })
+    },
+    onError: () => {
+      useUIStore.getState().addToast('Could not reveal file — is the volume mounted?', 'warning')
     },
   })
 }

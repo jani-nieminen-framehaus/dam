@@ -3,22 +3,22 @@
 DAM Card Watcher — auto-detect SD/CFexpress card mount and trigger full ingest pipeline.
 
 Runs as a LaunchAgent. When a new volume with a DCIM folder appears,
-fires: dam ingest → scan → thumbnails → AI tag (background).
+fires the shared ingest pipeline: copy → scan → thumbnails → AI tag (background).
 
 Logs to ~/Documents/dam/card_watcher.log
 """
 
 import logging
 import os
-import subprocess
 import sys
 import time
 from pathlib import Path
+from subprocess import TimeoutExpired
 
 from dam_config import DAM_ROOT, IGNORE_VOLUMES, INGEST_TIMEOUT, POLL_INTERVAL
+from ingest_pipeline import run_ingest_pipeline
 from platform_utils import find_dcim_mounts, launch_ingest_monitor, volume_label
 
-DAM_SCRIPT = DAM_ROOT / "dam.py"
 PYTHON = sys.executable
 LOG_FILE = DAM_ROOT / "card_watcher.log"
 
@@ -64,13 +64,14 @@ def run_ingest(card_path):
 
     start = time.time()
     try:
-        result = subprocess.run(
-            [PYTHON, str(DAM_SCRIPT), "ingest", card_path],
+        result = run_ingest_pipeline(
+            [card_path],
+            python=PYTHON,
             capture_output=True,
-            text=True,
             timeout=INGEST_TIMEOUT,
             cwd=str(DAM_ROOT),
             env=env,
+            announce=log.info,
         )
         elapsed = time.time() - start
 
@@ -86,7 +87,7 @@ def run_ingest(card_path):
 
         return result.returncode == 0
 
-    except subprocess.TimeoutExpired:
+    except TimeoutExpired:
         log.error("Ingest TIMED OUT after 2 hours")
         return False
     except Exception as e:

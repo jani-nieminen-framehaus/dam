@@ -51,7 +51,11 @@ export default function App() {
     else if (activeFilters.length > 0) parts.push(activeFilters.map(([k, v]) => `${k}: ${v}`).join(' | '))
     const title = `DAM — ${parts.join(' — ')}`
     document.title = title
-    try { (window as any).pywebview?.api?.set_title(title) } catch {}
+    try {
+      window.pywebview?.api?.set_title?.(title)
+    } catch (error) {
+      void error
+    }
   }, [totalFiltered, filters, isSearching, searchQuery])
 
   // Global ? key for help overlay

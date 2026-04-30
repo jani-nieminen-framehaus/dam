@@ -458,6 +458,49 @@ def test_open_jpeg_image_not_found(tmp_dam_root, app_client):
     assert resp.status_code == 404
 
 
+def test_reveal_uses_resolved_file(tmp_dam_root, app_client, monkeypatch):
+    import sqlite3
+
+    import dam_api
+    import dam_config
+
+    image = tmp_dam_root / "2026-04-09" / "IMG_1767.CR3"
+    image.parent.mkdir()
+    image.write_bytes(b"raw")
+    opened = []
+
+    conn = sqlite3.connect(str(dam_config.DB_PATH))
+    conn.execute(
+        "INSERT INTO images (file_path, file_name, file_type) VALUES (?, 'IMG_1767.CR3', 'CR3')",
+        (str(image),),
+    )
+    conn.commit()
+    img_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+    conn.close()
+
+    monkeypatch.setattr(dam_api, "reveal_path_external", lambda path: opened.append(path))
+
+    resp = app_client.post(f"/api/images/{img_id}/reveal", content_type="application/json")
+
+    assert resp.status_code == 200
+    assert opened == [image]
+
+
+def test_preview_invalid_cache_falls_back_to_thumbnail(tmp_dam_root, app_client):
+    img_id = _insert_test_image(tmp_dam_root)
+    import dam_api
+
+    dam_api.PREVIEW_DIR.mkdir(parents=True, exist_ok=True)
+    (dam_api.PREVIEW_DIR / f"{img_id}.jpg").write_bytes(b"not a jpeg")
+    thumb = dam_api.THUMB_DIR / f"{img_id}.jpg"
+    thumb.write_bytes(b"\xff\xd8\xffthumbnail")
+
+    resp = app_client.get(f"/api/previews/{img_id}.jpg")
+
+    assert resp.status_code == 200
+    assert resp.data.startswith(b"\xff\xd8\xff")
+
+
 # ── Apps endpoint ────────────────────────────────────────────────────────────
 
 
@@ -501,3 +544,44 @@ def test_sort_invalid_column_falls_back(tmp_dam_root, app_client):
     _insert_test_image(tmp_dam_root)
     resp = app_client.get("/api/images?sort_by=malicious_col")
     assert resp.status_code == 200
+
+
+def test_sort_pagination_uses_active_sort_cursor(tmp_dam_root, app_client):
+    """Non-date sorts should paginate without duplicating or skipping rows."""
+    import sqlite3
+
+    import dam_config
+
+    conn = sqlite3.connect(str(dam_config.DB_PATH))
+    conn.execute(
+        "INSERT INTO images (file_path, file_name, file_type, rating, pick, edit_status) "
+        "VALUES ('/test/A.RW2', 'A.RW2', 'RW2', 5, 'unmarked', 'unculled')"
+    )
+    conn.execute(
+        "INSERT INTO images (file_path, file_name, file_type, rating, pick, edit_status) "
+        "VALUES ('/test/B.RW2', 'B.RW2', 'RW2', 1, 'unmarked', 'unculled')"
+    )
+    conn.execute(
+        "INSERT INTO images (file_path, file_name, file_type, rating, pick, edit_status) "
+        "VALUES ('/test/C.RW2', 'C.RW2', 'RW2', 5, 'unmarked', 'unculled')"
+    )
+    conn.commit()
+    conn.close()
+
+    first = app_client.get("/api/images?sort_by=rating&sort_dir=desc&limit=2")
+    assert first.status_code == 200
+    first_data = first.get_json()
+    first_ids = [img["id"] for img in first_data["images"]]
+    assert len(first_ids) == 2
+    assert first_data["next_cursor"]["value"] == 5
+
+    cursor = first_data["next_cursor"]
+    second = app_client.get(
+        f"/api/images?sort_by=rating&sort_dir=desc&limit=2&cursor_value={cursor['value']}&cursor_id={cursor['id']}"
+    )
+    assert second.status_code == 200
+    second_data = second.get_json()
+    second_ids = [img["id"] for img in second_data["images"]]
+
+    assert set(first_ids).isdisjoint(second_ids)
+    assert second_ids == [2]

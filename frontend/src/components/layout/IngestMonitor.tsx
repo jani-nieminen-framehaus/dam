@@ -44,15 +44,18 @@ export function IngestMonitor() {
   })()
 
   const handleLogClick = () => {
-    try {
-      ;(window as any).pywebview?.api?.open_path?.(logPath)
-    } catch {
-      navigator.clipboard.writeText(logPath).then(() => {
-        addToast('Log path copied to clipboard', 'info')
-      }).catch(() => {
-        addToast('Could not copy log path', 'error')
+    const openPath = window.pywebview?.api?.open_path
+    if (openPath) {
+      void Promise.resolve(openPath(logPath)).catch(() => {
+        addToast('Could not open log location', 'error')
       })
+      return
     }
+    navigator.clipboard.writeText(logPath).then(() => {
+      addToast('Log path copied to clipboard', 'info')
+    }).catch(() => {
+      addToast('Could not copy log path', 'error')
+    })
   }
 
   return (
@@ -125,7 +128,7 @@ export function IngestMonitor() {
               onClick={handleLogClick}
               className="text-[10px] text-[var(--accent)] hover:underline"
             >
-              {(window as any).pywebview ? 'Open in Finder' : 'Copy path'}
+              {window.pywebview?.api?.open_path ? 'Open in Finder' : 'Copy path'}
             </button>
           </div>
         </div>

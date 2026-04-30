@@ -9,6 +9,7 @@ manually closed — does not auto-close on completion.
 Usage:
     python3 ingest_monitor.py --vol "Archive 2"
 """
+
 import argparse
 import json
 import os
@@ -20,19 +21,26 @@ from pathlib import Path
 if "QT_QPA_PLATFORM_PLUGIN_PATH" not in os.environ:
     try:
         import importlib.util
-        _spec = importlib.util.find_spec("PySide6")
-        if _spec and _spec.origin:
-            _qt_plugins = Path(_spec.origin).parent / "Qt" / "plugins"
-            if _qt_plugins.exists():
-                os.environ["QT_QPA_PLATFORM_PLUGIN_PATH"] = str(_qt_plugins)
+
+        spec = importlib.util.find_spec("PySide6")
+        if spec and spec.origin:
+            qt_plugins = Path(spec.origin).parent / "Qt" / "plugins"
+            if qt_plugins.exists():
+                os.environ["QT_QPA_PLATFORM_PLUGIN_PATH"] = str(qt_plugins)
     except Exception:
         pass
 
 from PySide6.QtCore import QEasingCurve, QPropertyAnimation, QSize, Qt, QTimer, QUrl
 from PySide6.QtGui import QDesktopServices, QPixmap
 from PySide6.QtWidgets import (
-    QApplication, QDialog, QGraphicsOpacityEffect, QHBoxLayout,
-    QLabel, QProgressBar, QPushButton, QVBoxLayout,
+    QApplication,
+    QDialog,
+    QGraphicsOpacityEffect,
+    QHBoxLayout,
+    QLabel,
+    QProgressBar,
+    QPushButton,
+    QVBoxLayout,
 )
 
 from dam_config import DAM_ROOT, INGEST_STATUS_FILE, TAGGER_STATUS_FILE, THUMB_DIR
@@ -95,7 +103,6 @@ class IngestMonitorWindow(QDialog):
         root.setContentsMargins(16, 16, 16, 12)
         root.setSpacing(10)
 
-        # Phase dots
         phase_row = QHBoxLayout()
         phase_row.setSpacing(16)
         self.phase_dots = [PhaseDot(label) for label in PHASE_LABELS]
@@ -104,7 +111,6 @@ class IngestMonitorWindow(QDialog):
         phase_row.addStretch()
         root.addLayout(phase_row)
 
-        # Thumbnail + counter/keywords
         info_row = QHBoxLayout()
         info_row.setSpacing(12)
 
@@ -121,7 +127,7 @@ class IngestMonitorWindow(QDialog):
 
         text_col = QVBoxLayout()
         text_col.setSpacing(4)
-        self.counter_label = QLabel("Starting\u2026")
+        self.counter_label = QLabel("Starting…")
         self.counter_label.setStyleSheet(f"color: {TEXT}; font-size: 13px;")
         text_col.addWidget(self.counter_label)
         self.keywords_label = QLabel("")
@@ -133,7 +139,6 @@ class IngestMonitorWindow(QDialog):
         info_row.addLayout(text_col)
         root.addLayout(info_row)
 
-        # Progress bar
         self.progress_bar = QProgressBar()
         self.progress_bar.setRange(0, 100)
         self.progress_bar.setValue(0)
@@ -141,7 +146,6 @@ class IngestMonitorWindow(QDialog):
         self.progress_bar.setFixedHeight(6)
         root.addWidget(self.progress_bar)
 
-        # Log row
         log_row = QHBoxLayout()
         log_label = QLabel(str(LOG_FILE).replace(str(Path.home()), "~"))
         log_label.setStyleSheet(f"color: {TEXT_DIM}; font-size: 10px;")
@@ -251,9 +255,9 @@ class IngestMonitorWindow(QDialog):
             self.dest_root = ingest["dest_root"]
 
         if ingest_s == "idle" and tagger_s == "done":
-            self.setWindowTitle(f"DAM \u2014 Done \u2713  ({self.vol_name})")
+            self.setWindowTitle(f"DAM — Done ✓  ({self.vol_name})")
         elif ingest_s == "error" or tagger_s == "error":
-            self.setWindowTitle(f"DAM \u2014 Failed  ({self.vol_name})")
+            self.setWindowTitle(f"DAM — Failed  ({self.vol_name})")
             self.setStyleSheet(
                 f"QDialog {{ background: {REJECT}; color: {TEXT}; }}"
                 f"QProgressBar {{ background: {BG3}; border: none; border-radius: 3px; }}"
@@ -268,21 +272,21 @@ class IngestMonitorWindow(QDialog):
         total = tagger.get("total") if is_tagging else ingest.get("total")
 
         if total and total > 0:
-            pct = min(100, int(round((current or 0) / total * 100)))
+            pct = min(100, round((current or 0) / total * 100))
             if pct != self.progress_bar.value():
                 self._animate_progress(pct)
             self.counter_label.setText(f"{current or 0} of {total} photos")
         else:
-            self.counter_label.setText("Starting\u2026")
+            self.counter_label.setText("Starting…")
 
         if ingest_s == "idle" and tagger_s == "done":
             if self.progress_bar.value() < 100:
                 self._animate_progress(100)
-            self.counter_label.setText(f"Complete \u2014 {total or '?'} photos tagged")
+            self.counter_label.setText(f"Complete — {total or '?'} photos tagged")
 
         keywords = tagger.get("last_keywords") or []
         if is_tagging and keywords:
-            self.keywords_label.setText(" \u00b7 ".join(keywords))
+            self.keywords_label.setText(" · ".join(keywords))
             self.keywords_label.setVisible(True)
         else:
             self.keywords_label.setVisible(False)
@@ -303,7 +307,6 @@ def main():
     qt_app = QApplication(sys.argv)
     window = IngestMonitorWindow(args.vol)
     window.show()
-    # Start the Qt event loop (PySide6: QApplication.exec())
     raise SystemExit(qt_app.exec())
 
 

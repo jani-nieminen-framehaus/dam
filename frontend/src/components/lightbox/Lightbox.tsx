@@ -1,18 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { X, ChevronLeft, ChevronRight, FolderOpen, Image as ImageIcon, ChevronDown, Search } from 'lucide-react'
+import { X, ChevronLeft, ChevronRight, FolderOpen, Image as ImageIcon, ChevronDown, Search, FolderSearch } from 'lucide-react'
 import type { DamImage } from '../../types'
-import { usePatchImage, useOpenExternal, useOpenJpeg, useAddKeyword, useRemoveKeyword, useAddProject, useRemoveProject } from '../../api/images'
+import { usePatchImage, useOpenExternal, useOpenJpeg, useReveal, useAddKeyword, useRemoveKeyword, useAddProject, useRemoveProject } from '../../api/images'
 import { useInstalledApps, useFilters } from '../../api/filters'
 import { useUIStore } from '../../stores/useUIStore'
 import { StarRating } from '../shared/StarRating'
-
-const DEFAULT_APPS: { label: string; app: string | undefined }[] = [
-  { label: 'System default', app: undefined },
-  { label: 'Capture One', app: 'Capture One' },
-  { label: 'DxO PhotoLab', app: 'DxO PhotoLab' },
-  { label: 'DxO FilmPack', app: 'DxO FilmPack' },
-  { label: 'DaVinci Resolve', app: 'DaVinci Resolve' },
-]
 
 interface Props {
   image: DamImage
@@ -26,6 +18,7 @@ export function Lightbox({ image, images, currentIndex, onClose, onNavigate }: P
   const patchImage = usePatchImage()
   const openExternal = useOpenExternal()
   const openJpeg = useOpenJpeg()
+  const reveal = useReveal()
   const addKeyword = useAddKeyword()
   const removeKeyword = useRemoveKeyword()
   const addProject = useAddProject()
@@ -41,15 +34,16 @@ export function Lightbox({ image, images, currentIndex, onClose, onNavigate }: P
   const appFilterRef = useRef<HTMLInputElement>(null)
   const { data: appsData } = useInstalledApps()
 
-  // Filter installed apps, excluding ones already in defaults
-  const defaultAppNames = useMemo(() => new Set(DEFAULT_APPS.map(d => d.app)), [])
+  // Photo apps shown as quick-access, rest available via browse
+  const photoApps = useMemo(() => appsData?.photo_apps ?? [], [appsData])
   const filteredApps = useMemo(() => {
     const all = appsData?.apps ?? []
-    const extras = all.filter(name => !defaultAppNames.has(name))
+    const photoSet = new Set(appsData?.photo_apps ?? [])
+    const extras = all.filter(name => !photoSet.has(name))
     if (!appFilter) return extras
     const q = appFilter.toLowerCase()
     return extras.filter(name => name.toLowerCase().includes(q))
-  }, [appsData, appFilter, defaultAppNames])
+  }, [appsData, appFilter])
 
   const canPrev = currentIndex > 0
   const canNext = currentIndex < images.length - 1
@@ -107,6 +101,13 @@ export function Lightbox({ image, images, currentIndex, onClose, onNavigate }: P
     })
   }, [image.id, openJpeg, showFlash])
 
+  const handleReveal = useCallback(() => {
+    reveal.mutate(image.id, {
+      onSuccess: () => showFlash('Revealed in Finder'),
+      onError: (err) => showFlash(err.message),
+    })
+  }, [image.id, reveal, showFlash])
+
   // Close app menu on outside click
   useEffect(() => {
     if (!openMenuVisible) return
@@ -127,12 +128,12 @@ export function Lightbox({ image, images, currentIndex, onClose, onNavigate }: P
     if (browsing) appFilterRef.current?.focus()
   }, [browsing])
 
-  // Preload adjacent images (N+1 and N-1)
+  // Preload adjacent previews (N+1 and N-1)
   useEffect(() => {
     ;[images[currentIndex + 1], images[currentIndex - 1]].forEach((adj) => {
       if (adj) {
         const img = new Image()
-        img.src = `/api/thumbs/${adj.id}.jpg`
+        img.src = `/api/previews/${adj.id}.jpg`
       }
     })
   }, [currentIndex, images])
@@ -156,11 +157,12 @@ export function Lightbox({ image, images, currentIndex, onClose, onNavigate }: P
         case '5': setRating(5); break
         case 'o': case 'O': handleOpenExternal(lastOpenApp); break
         case 'j': case 'J': if (image.has_jpeg) handleOpenJpeg(); break
+        case 'f': case 'F': handleReveal(); break
       }
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
-  }, [onClose, goNext, goPrev, setPick, setRating, handleOpenExternal, handleOpenJpeg, image.has_jpeg, lastOpenApp])
+  }, [onClose, goNext, goPrev, setPick, setRating, handleOpenExternal, handleOpenJpeg, handleReveal, image.has_jpeg, lastOpenApp])
 
   const exifLine = [
     image.camera_short,
@@ -211,21 +213,39 @@ export function Lightbox({ image, images, currentIndex, onClose, onNavigate }: P
             </button>
             {openMenuVisible && (
               <div id="open-with-menu" className="absolute top-full right-0 mt-1 py-1 rounded bg-[var(--bg2)] border border-[var(--border)] shadow-lg z-50 min-w-[200px]">
-                {/* Quick-access defaults */}
-                {DEFAULT_APPS.map(({ label, app }) => (
-                  <button key={label} onClick={() => handleOpenWithApp(app)}
-                    className={`w-full text-left px-3 py-1.5 text-xs hover:bg-[var(--bg3)] ${
-                      lastOpenApp === app ? 'text-[var(--accent)]' : 'text-[var(--text)]'
-                    }`}>
-                    {label}
-                  </button>
-                ))}
-                {/* Divider + Browse */}
+                {/* System default */}
+                <button onClick={() => handleOpenWithApp(undefined)}
+                  className={`w-full text-left px-3 py-1.5 text-xs hover:bg-[var(--bg3)] ${
+                    lastOpenApp === undefined ? 'text-[var(--accent)]' : 'text-[var(--text)]'
+                  }`}>
+                  System default
+                </button>
+                {/* Reveal in Finder — always works */}
+                <button onClick={() => { setOpenMenuVisible(false); handleReveal() }}
+                  className="w-full text-left px-3 py-1.5 text-xs text-[var(--text)] hover:bg-[var(--bg3)] flex items-center gap-1.5">
+                  <FolderSearch size={11} />
+                  Reveal in Finder (F)
+                </button>
+                {/* Detected photo/video apps */}
+                {photoApps.length > 0 && (
+                  <>
+                    <div className="border-t border-[var(--border)] my-1" />
+                    {photoApps.map((name) => (
+                      <button key={name} onClick={() => handleOpenWithApp(name)}
+                        className={`w-full text-left px-3 py-1.5 text-xs hover:bg-[var(--bg3)] ${
+                          lastOpenApp === name ? 'text-[var(--accent)]' : 'text-[var(--text)]'
+                        }`}>
+                        {name}
+                      </button>
+                    ))}
+                  </>
+                )}
+                {/* Divider + Browse all */}
                 <div className="border-t border-[var(--border)] my-1" />
                 {!browsing ? (
                   <button onClick={() => setBrowsing(true)}
                     className="w-full text-left px-3 py-1.5 text-xs text-[var(--text-mid)] hover:bg-[var(--bg3)]">
-                    Open with...
+                    Other apps...
                   </button>
                 ) : (
                   <>
@@ -260,6 +280,12 @@ export function Lightbox({ image, images, currentIndex, onClose, onNavigate }: P
               </div>
             )}
           </div>
+          {/* Reveal in Finder */}
+          <button onClick={handleReveal}
+            className="text-[var(--text-dim)] hover:text-white flex items-center gap-1 text-xs"
+            title="Reveal in Finder (F)">
+            <FolderSearch size={15} />
+          </button>
           {/* Open JPEG sidecar */}
           {image.has_jpeg && (
             <button onClick={handleOpenJpeg}
@@ -284,9 +310,15 @@ export function Lightbox({ image, images, currentIndex, onClose, onNavigate }: P
         )}
 
         <img
-          src={`/api/thumbs/${image.id}.jpg`}
+          src={`/api/previews/${image.id}.jpg`}
           alt={image.file_name}
           className="max-h-full max-w-full object-contain"
+          onError={(e) => {
+            // Fall back to grid thumbnail if preview fails to load
+            const el = e.currentTarget
+            const thumbUrl = `/api/thumbs/${image.id}.jpg`
+            if (!el.src.endsWith(thumbUrl)) el.src = thumbUrl
+          }}
         />
 
         {canNext && (

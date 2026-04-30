@@ -282,9 +282,9 @@ def propagate_burst_tags(conn, rep_id, sibling_ids, description, kw_dict, embedd
         )
         write_keywords(conn, sid, kw_dict)
         if embedding_blob:
+            conn.execute("DELETE FROM image_embeddings WHERE image_id = ?", (sid,))
             conn.execute(
-                """INSERT OR REPLACE INTO image_embeddings (image_id, embedding)
-                   VALUES (?, ?)""",
+                "INSERT INTO image_embeddings (image_id, embedding) VALUES (?, ?)",
                 (sid, embedding_blob),
             )
 
@@ -476,7 +476,9 @@ def _write_tag_results(conn, image_id, description, kw_dict, blob):
     )
     write_keywords(conn, image_id, kw_dict)
     conn.execute(
-        "INSERT OR REPLACE INTO image_embeddings (image_id, embedding) VALUES (?, ?)",
+        "DELETE FROM image_embeddings WHERE image_id = ?", (image_id,))
+    conn.execute(
+        "INSERT INTO image_embeddings (image_id, embedding) VALUES (?, ?)",
         (image_id, blob),
     )
     conn.commit()

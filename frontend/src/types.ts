@@ -56,7 +56,7 @@ export interface DamImage {
 }
 
 export interface Cursor {
-  date: string
+  value: string | number
   id: number
 }
 

@@ -37,20 +37,14 @@ from dam_config import (
     DEFAULT_VOLUMES,
     GUNICORN_WORKERS,
     IGNORE_VOLUMES,
-    LAST_INGEST_FILE,
     PORT,
     VOLUME_ALIASES,
     WINDOW_SIZE,
     cmd_config,
 )
-from platform_utils import spawn_background_process
+from ingest_pipeline import SCANNER_SCRIPT, TAGGER_SCRIPT, run_ingest_pipeline
+from platform_utils import open_path_external
 from storage_utils import resolve_archive_file
-
-# When frozen (PyInstaller), scripts are bundled in sys._MEIPASS, not in DAM_ROOT
-_SCRIPT_ROOT = Path(sys._MEIPASS) if getattr(sys, "frozen", False) else DAM_ROOT
-INGEST_SCRIPT = _SCRIPT_ROOT / "card_ingest.py"
-SCANNER_SCRIPT = _SCRIPT_ROOT / "dam_scanner.py"
-TAGGER_SCRIPT = _SCRIPT_ROOT / "dam_tagger.py"
 
 
 def run(cmd, description):
@@ -61,43 +55,11 @@ def run(cmd, description):
 
 def cmd_ingest(args):
     dry_run = "--dry-run" in args
-    card_args = [a for a in args if not a.startswith("--")]
-
-    ingest_cmd = [sys.executable, str(INGEST_SCRIPT)]
-    if card_args:
-        ingest_cmd.extend(card_args)
-    if dry_run:
-        ingest_cmd.append("--dry-run")
-
-    rc = run(ingest_cmd, "STEP 1/4 — Card Ingest")
-    if rc != 0:
-        print(f"\nIngest failed (exit {rc}). Aborting.")
-        sys.exit(rc)
-
-    if dry_run:
-        print("\nDry run complete. No DB changes made.")
-        return
-
-    rc = run([sys.executable, str(SCANNER_SCRIPT), "--no-thumbs"], "STEP 2/4 — Scanning New Files")
-    if rc != 0:
-        print(f"\nScan failed (exit {rc}). Thumbnails skipped.")
-        sys.exit(rc)
-
-    run([sys.executable, str(SCANNER_SCRIPT), "--no-scan"], "STEP 3/4 — Generating Thumbnails for New Files")
-
-    # Step 4: AI tagging in background (takes minutes/hours, don't block)
     no_tag = "--no-tag" in args
-    if no_tag:
-        print("\nIngest complete (AI tagging skipped).")
-    else:
-        print("\nDAM ── STEP 4/4 — AI Tagging (background)\n" + "-" * 50)
-        tag_log = DAM_ROOT / "tagger_run.log"
-        tag_cmd = [sys.executable, str(TAGGER_SCRIPT)]
-        if LAST_INGEST_FILE.exists():
-            tag_cmd.extend(["--manifest", str(LAST_INGEST_FILE)])
-        spawn_background_process(tag_cmd, tag_log, cwd=DAM_ROOT)
-        print(f"  Tagger launched in background. Monitor: tail -f {tag_log}")
-        print("\nIngest complete. AI tagging running in background.")
+    card_args = [a for a in args if not a.startswith("--")]
+    result = run_ingest_pipeline(card_args, dry_run=dry_run, no_tag=no_tag)
+    if result.returncode != 0:
+        sys.exit(result.returncode)
 
 
 def cmd_scan(args):
@@ -195,16 +157,18 @@ class _DamBridge:
         import threading
 
         def _run():
-            cmd = [sys.executable, str(INGEST_SCRIPT)]
-            if card_path:
-                cmd.append(card_path)
-            subprocess.run(cmd, cwd=str(DAM_ROOT))
-            # After ingest, run scan + thumbs
-            subprocess.run([sys.executable, str(SCANNER_SCRIPT), "--no-thumbs"], cwd=str(DAM_ROOT))
-            subprocess.run([sys.executable, str(SCANNER_SCRIPT), "--no-scan"], cwd=str(DAM_ROOT))
+            run_ingest_pipeline([card_path] if card_path else [], dry_run=False, no_tag=False)
 
         threading.Thread(target=_run, daemon=True).start()
         return {"status": "started"}
+
+    def open_path(self, path):
+        """Open a file or reveal its parent folder via the native shell."""
+        target = Path(path).expanduser()
+        if target.is_file() or (target.suffix and not target.is_dir()):
+            target = target.parent
+        open_path_external(target)
+        return {"status": "opened"}
 
     def pick_folder(self):
         """Open a native folder picker dialog."""
@@ -298,7 +262,7 @@ def _serve_window(port):
 
     win_ref = weakref.ref(window)
     bridge = _DamBridge(win_ref)
-    window.expose(bridge.set_title, bridge.start_ingest, bridge.pick_folder)
+    window.expose(bridge.set_title, bridge.start_ingest, bridge.open_path, bridge.pick_folder)
 
     import platform
 

@@ -1,4 +1,4 @@
-import { useRef, useCallback, useMemo, useEffect } from 'react'
+import { useRef, useCallback, useMemo, useEffect, useState } from 'react'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import type { DamImage } from '../../types'
 import { ImageCard } from './ImageCard'
@@ -14,6 +14,7 @@ interface Props {
 
 export function ImageGrid({ images, thumbSize, hasNextPage, isFetchingNextPage, fetchNextPage }: Props) {
   const parentRef = useRef<HTMLDivElement>(null)
+  const [containerWidth, setContainerWidth] = useState(0)
   const { selectAll, lightboxIndex } = useUIStore()
 
   // Cmd+A to select all visible images
@@ -32,10 +33,9 @@ export function ImageGrid({ images, thumbSize, hasNextPage, isFetchingNextPage, 
 
   // Calculate columns based on container width
   const columns = useMemo(() => {
-    if (!parentRef.current) return 6
-    const w = parentRef.current.clientWidth
-    return Math.max(1, Math.floor((w + gap) / (thumbSize + gap)))
-  }, [thumbSize])
+    if (containerWidth <= 0) return 6
+    return Math.max(1, Math.floor((containerWidth + gap) / (thumbSize + gap)))
+  }, [containerWidth, thumbSize])
 
   const rowCount = Math.ceil(images.length / columns)
 
@@ -60,7 +60,12 @@ export function ImageGrid({ images, thumbSize, hasNextPage, isFetchingNextPage, 
   useEffect(() => {
     const el = parentRef.current
     if (!el) return
-    const ro = new ResizeObserver(() => virtualizer.measure())
+    const updateWidth = () => {
+      setContainerWidth(el.clientWidth)
+      virtualizer.measure()
+    }
+    updateWidth()
+    const ro = new ResizeObserver(updateWidth)
     ro.observe(el)
     return () => ro.disconnect()
   }, [virtualizer])

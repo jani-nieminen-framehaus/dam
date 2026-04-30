@@ -199,6 +199,27 @@ def open_path_external(path: str | Path, app_name: str | None = None) -> None:
         subprocess.run(["xdg-open", target], check=True)
 
 
+def reveal_path_external(path: str | Path) -> None:
+    """Reveal a file in the native file manager, falling back to its parent folder."""
+    target = Path(path)
+
+    if is_macos():
+        try:
+            subprocess.run(["open", "-R", str(target)], check=True)
+        except (subprocess.CalledProcessError, OSError):
+            open_path_external(target.parent)
+        return
+
+    if is_windows():
+        try:
+            subprocess.run(["explorer", f"/select,{target}"], check=True)
+        except (subprocess.CalledProcessError, OSError):
+            open_path_external(target.parent)
+        return
+
+    open_path_external(target.parent)
+
+
 def spawn_background_process(cmd: list[str], log_file: Path, cwd: Path | str | None = None) -> subprocess.Popen:
     """Spawn detached background process and redirect stdout/stderr to log_file."""
     log_file.parent.mkdir(parents=True, exist_ok=True)

@@ -21,7 +21,7 @@ export function useStats() {
 export function useInstalledApps() {
   return useQuery({
     queryKey: ['apps'],
-    queryFn: () => apiFetch<{ apps: string[] }>('/apps'),
+    queryFn: () => apiFetch<{ apps: string[]; photo_apps: string[] }>('/apps'),
     staleTime: 300_000, // Apps don't change often
   })
 }

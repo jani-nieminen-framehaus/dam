@@ -23,6 +23,7 @@ Endpoints:
     GET    /api/filters                    Available filter values for UI
 """
 
+import contextlib
 import json
 import os
 import subprocess
@@ -38,7 +39,6 @@ from dam_config import (
     EMBED_MODEL,
     IGNORE_VOLUMES,
     INGEST_STATUS_FILE,
-    OLLAMA_BASE,
     OLLAMA_BASE_EMBED,
     PAGE_SIZE,
     SPA_DIR,
@@ -47,7 +47,7 @@ from dam_config import (
     VOLUME_ALIASES,
 )
 from dam_db import get_db, serialize_vector, wal_checkpoint
-from platform_utils import open_path_external
+from platform_utils import open_path_external, reveal_path_external
 from storage_utils import resolve_archive_file
 
 app = Flask(__name__, static_folder=None)
@@ -114,6 +114,14 @@ FIELD_VALIDATORS = {
     "location_type": (lambda _: True, ""),
 }
 
+_ALLOWED_SORT_COLS = {"date_taken", "rating", "file_name", "camera_short"}
+_SORT_CONFIGS = {
+    "date_taken": {"expr": "COALESCE(i.date_taken, '')", "default": "", "coerce": str},
+    "rating": {"expr": "COALESCE(i.rating, 0)", "default": 0, "coerce": int},
+    "file_name": {"expr": "COALESCE(i.file_name, '')", "default": "", "coerce": str},
+    "camera_short": {"expr": "COALESCE(i.camera_short, '')", "default": "", "coerce": str},
+}
+
 
 def validate_patch(data):
     clean = {}
@@ -173,11 +181,23 @@ def build_filters(args):
         clauses.append("i.is_selkie = ?")
         params.append(1 if v.lower() == "true" else 0)
 
-    cursor_date = args.get("cursor_date")
     cursor_id = args.get("cursor_id")
-    if cursor_date and cursor_id:
-        clauses.append("(i.date_taken < ? OR (i.date_taken = ? AND i.id < ?))")
-        params.extend([cursor_date, cursor_date, int(cursor_id)])
+    sort_by = args.get("sort_by", "date_taken")
+    if sort_by not in _ALLOWED_SORT_COLS:
+        sort_by = "date_taken"
+    sort_dir = args.get("sort_dir", "desc").upper()
+    if sort_dir not in ("ASC", "DESC"):
+        sort_dir = "DESC"
+    cursor_value = args.get("cursor_value")
+    if cursor_value is None and sort_by == "date_taken":
+        cursor_value = args.get("cursor_date")
+    if cursor_value is not None and cursor_id:
+        sort_cfg = _SORT_CONFIGS[sort_by]
+        normalized = sort_cfg["default"] if cursor_value == "" else sort_cfg["coerce"](cursor_value)
+        op = ">" if sort_dir == "ASC" else "<"
+        expr = sort_cfg["expr"]
+        clauses.append(f"({expr} {op} ? OR ({expr} = ? AND i.id {op} ?))")
+        params.extend([normalized, normalized, int(cursor_id)])
 
     where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
     return where, params
@@ -203,14 +223,34 @@ def favicon():
 
 @app.route("/api/apps", methods=["GET"])
 def list_apps():
-    """List installed macOS applications suitable for opening media files."""
+    """List installed macOS applications suitable for opening media files.
+
+    Returns apps split into 'photo_apps' (known photo/video editors) and 'other'.
+    """
     apps_dir = Path("/Applications")
     if not apps_dir.is_dir():
-        return jsonify({"apps": []})
-    names = sorted(
-        p.stem for p in apps_dir.glob("*.app")
-    )
-    return jsonify({"apps": names})
+        return jsonify({"apps": [], "photo_apps": []})
+
+    # Known photo/video app bundle stems (case-insensitive matching)
+    _PHOTO_KEYWORDS = {
+        "capture one", "dxo", "photolab", "filmpack", "davinci",
+        "lightroom", "photoshop", "affinity", "darktable", "rawtherapee",
+        "gimp", "acorn", "pixelmator", "preview", "darkroom", "raw power",
+        "iridient", "nik collection", "xnviewmp", "graphicconverter",
+        "rapidraw", "rawdigger", "apolloone", "peakto",
+    }
+
+    all_names = sorted(p.stem for p in apps_dir.glob("*.app"))
+    photo_apps = []
+    other_apps = []
+    for name in all_names:
+        lower = name.lower()
+        if any(kw in lower for kw in _PHOTO_KEYWORDS):
+            photo_apps.append(name)
+        else:
+            other_apps.append(name)
+
+    return jsonify({"apps": all_names, "photo_apps": photo_apps})
 
 
 @app.route("/api/ingest/status", methods=["GET"])
@@ -261,7 +301,85 @@ def thumb(filename):
     return send_from_directory(str(THUMB_DIR), filename)
 
 
-_ALLOWED_SORT_COLS = {"date_taken", "rating", "file_name", "camera_short"}
+PREVIEW_DIR = THUMB_DIR.parent / "previews"
+PREVIEW_DIR.mkdir(parents=True, exist_ok=True)
+_PREVIEW_MAX_DIM = 1600
+
+
+def _is_usable_jpeg(path: Path) -> bool:
+    """Cheaply reject empty or corrupt cached previews before serving them."""
+    try:
+        if path.stat().st_size < 32:
+            return False
+        with path.open("rb") as fh:
+            return fh.read(3) == b"\xff\xd8\xff"
+    except OSError:
+        return False
+
+
+@app.route("/api/previews/<int:image_id>.jpg")
+def preview(image_id):
+    """Serve a 1600px preview, generating on-demand if needed.
+
+    Falls back to the grid thumbnail when generation fails or the source
+    file is unavailable.  The entire generation path is wrapped in a
+    broad except so that subprocess / DB / mount-resolution errors never
+    surface as a raw 500 — the lightbox always gets *some* image.
+    """
+    preview_path = PREVIEW_DIR / f"{image_id}.jpg"
+
+    if _is_usable_jpeg(preview_path):
+        return send_file(str(preview_path), mimetype="image/jpeg")
+    if preview_path.exists():
+        with contextlib.suppress(OSError):
+            preview_path.unlink()
+
+    try:
+        db = _db()
+        row = db.execute("SELECT file_path, volume, relative_path FROM images WHERE id = ?", (image_id,)).fetchone()
+        if not row:
+            abort(404)
+
+        resolved = resolve_archive_file(
+            row["file_path"], row["volume"], row["relative_path"], DEFAULT_VOLUMES, IGNORE_VOLUMES, VOLUME_ALIASES
+        )
+        if resolved is not None:
+            import platform
+            import shutil
+
+            ext = resolved.suffix.lower()
+            raw_extensions = {".arw", ".cr2", ".cr3", ".nef", ".orf", ".raf", ".rw2", ".dng", ".pef", ".srw"}
+
+            if ext in raw_extensions:
+                for tag in ["-JpgFromRaw", "-PreviewImage"]:
+                    result = subprocess.run(["exiftool", "-b", tag, str(resolved)], capture_output=True, timeout=15)
+                    if result.stdout and len(result.stdout) > 1000:
+                        preview_path.write_bytes(result.stdout)
+                        if platform.system() == "Darwin":
+                            subprocess.run(["sips", "-Z", str(_PREVIEW_MAX_DIM), str(preview_path)], capture_output=True, timeout=10)
+                        if _is_usable_jpeg(preview_path):
+                            return send_file(str(preview_path), mimetype="image/jpeg")
+            elif ext in (".jpg", ".jpeg"):
+                shutil.copy2(str(resolved), str(preview_path))
+                if platform.system() == "Darwin":
+                    subprocess.run(["sips", "-Z", str(_PREVIEW_MAX_DIM), str(preview_path)], capture_output=True, timeout=10)
+                if _is_usable_jpeg(preview_path):
+                    return send_file(str(preview_path), mimetype="image/jpeg")
+    except Exception:
+        pass
+
+    # Final fallback: serve thumb if preview generation failed
+    thumb_path = THUMB_DIR / f"{image_id}.jpg"
+    if thumb_path.exists():
+        return send_file(str(thumb_path), mimetype="image/jpeg")
+    abort(404)
+
+
+def _normalize_cursor_value(sort_by, value):
+    sort_cfg = _SORT_CONFIGS[sort_by]
+    if value is None:
+        return sort_cfg["default"]
+    return value
 
 
 @app.route("/api/images", methods=["GET"])
@@ -276,7 +394,8 @@ def images():
     sort_dir = request.args.get("sort_dir", "desc").upper()
     if sort_dir not in ("ASC", "DESC"):
         sort_dir = "DESC"
-    order_clause = f"ORDER BY i.{sort_by} {sort_dir}, i.id {sort_dir}"
+    sort_expr = _SORT_CONFIGS[sort_by]["expr"]
+    order_clause = f"ORDER BY {sort_expr} {sort_dir}, i.id {sort_dir}"
 
     sql = f"""
         SELECT i.*,
@@ -300,7 +419,11 @@ def images():
     """
 
     # Count without cursor or limit
-    count_args = {k: v for k, v in request.args.items() if k not in ("cursor_date", "cursor_id", "limit", "sort_by", "sort_dir")}
+    count_args = {
+        k: v
+        for k, v in request.args.items()
+        if k not in ("cursor_date", "cursor_value", "cursor_id", "limit", "sort_by", "sort_dir")
+    }
     count_where, count_params = build_filters(count_args)
     count_sql = f"SELECT COUNT(*) FROM images i {count_where}"
 
@@ -312,7 +435,7 @@ def images():
     next_cursor = None
     if len(result) == limit:
         last = result[-1]
-        next_cursor = {"date": last["date_taken"], "id": last["id"]}
+        next_cursor = {"value": _normalize_cursor_value(sort_by, last.get(sort_by)), "id": last["id"]}
 
     return jsonify({"images": result, "next_cursor": next_cursor, "total_filtered": total})
 
@@ -705,6 +828,28 @@ def image_open_jpeg(image_id):
         return jsonify({"success": True, "action": "opened_jpeg"})
     except (subprocess.CalledProcessError, OSError) as e:
         return jsonify({"error": f"Launch failed: {e}"}), 500
+
+
+@app.route("/api/images/<int:image_id>/reveal", methods=["POST"])
+def image_reveal(image_id):
+    """Reveal the image file in Finder — always works regardless of app."""
+    db = _db()
+    row = db.execute("SELECT file_path, volume, relative_path FROM images WHERE id = ?", (image_id,)).fetchone()
+
+    if not row or not row["file_path"]:
+        abort(404)
+
+    resolved = resolve_archive_file(
+        row["file_path"], row["volume"], row["relative_path"], DEFAULT_VOLUMES, IGNORE_VOLUMES, VOLUME_ALIASES
+    )
+    if resolved is None:
+        return jsonify({"error": "File not found on disk"}), 404
+
+    try:
+        reveal_path_external(resolved)
+        return jsonify({"success": True, "action": "revealed"})
+    except (subprocess.CalledProcessError, OSError) as e:
+        return jsonify({"error": f"Reveal failed: {e}"}), 500
 
 
 @app.route("/api/stats", methods=["GET"])

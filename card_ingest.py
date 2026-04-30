@@ -16,6 +16,7 @@ Safety:
     - No deletion — you format the card in-camera
 """
 
+import contextlib
 import hashlib
 import json
 import os
@@ -62,10 +63,8 @@ def copy_file_with_md5(src_path, dst_path, chunk_size=4 * 1024 * 1024):
             os.fsync(dst_file.fileno())
         shutil.copystat(src_path, dst_path)
     except Exception:
-        try:
+        with contextlib.suppress(FileNotFoundError):
             Path(dst_path).unlink()
-        except FileNotFoundError:
-            pass
         raise
     return digest.hexdigest()
 

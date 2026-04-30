@@ -39,6 +39,7 @@ py-modules = [
     "card_ingest",
     "card_watcher",
     "ingest_monitor",
+    "ingest_pipeline",
     "platform_utils",
     "storage_utils",
 ]
@@ -73,7 +74,7 @@ ignore = [
 ]
 
 [tool.ruff.lint.isort]
-known-first-party = ["dam_config", "dam_db", "dam_schema", "dam_api", "dam_scanner", "dam_tagger", "card_ingest", "card_watcher"]
+known-first-party = ["dam_config", "dam_db", "dam_schema", "dam_api", "dam_scanner", "dam_tagger", "card_ingest", "card_watcher", "ingest_pipeline"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

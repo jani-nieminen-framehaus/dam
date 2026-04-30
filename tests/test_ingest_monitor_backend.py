@@ -1,5 +1,6 @@
 """Tests for ingest monitor — status file writes and Flask endpoints."""
 import json
+import py_compile
 import sys
 from pathlib import Path
 
@@ -30,6 +31,12 @@ def test_update_ingest_status_includes_current_path_and_dest_root(tmp_path):
         assert data["total"] == 100
     finally:
         dam_config.INGEST_STATUS_FILE = orig
+
+
+def test_ingest_monitor_module_compiles():
+    """The standalone monitor script should stay syntactically valid."""
+    monitor_path = Path(__file__).resolve().parent.parent / "ingest_monitor.py"
+    py_compile.compile(str(monitor_path), doraise=True)
 
 
 def test_update_ingest_status_current_path_defaults_to_none(tmp_path):
