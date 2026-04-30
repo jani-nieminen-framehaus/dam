@@ -180,6 +180,32 @@ def _parse_raw_keywords(raw):
     return keywords[:12], seen
 
 
+def _ground_keywords(keywords, description):
+    """Drop keywords not justified by the description text.
+
+    The fine-tuned dam-tagger overconfidently invents themes ("neglect" on an ice
+    cream cone, "isolation" on a benign scene). To keep keywords visually grounded,
+    a candidate must satisfy one of:
+      - Be in the controlled technical vocabulary (always allowed), OR
+      - Appear verbatim as a substring of the description, OR
+      - Have all of its significant tokens (>3 chars) appear as substrings,
+        which forgives spacing variants like "smart phone" vs "smartphone".
+    """
+    desc_lower = description.lower()
+    grounded = []
+    for kw in keywords:
+        if kw in _TECHNICAL_WORDS:
+            grounded.append(kw)
+            continue
+        if kw in desc_lower:
+            grounded.append(kw)
+            continue
+        tokens = [t for t in kw.split() if len(t) > 3]
+        if tokens and all(t in desc_lower for t in tokens):
+            grounded.append(kw)
+    return grounded
+
+
 def text_extract_keywords(description, technical="", context=""):
     """Run dam-tagger (fine-tuned Mistral 7B) on description, return keyword dict."""
     prompt = TAGGER_PROMPT.format(
@@ -194,7 +220,9 @@ def text_extract_keywords(description, technical="", context=""):
         base_url=OLLAMA_BASE_TEXT,
     )
 
-    keywords, seen = _parse_raw_keywords(resp.get("response", "").strip())
+    keywords, _seen = _parse_raw_keywords(resp.get("response", "").strip())
+    keywords = _ground_keywords(keywords, description)
+    seen = set(keywords)
 
     factual = [kw for kw in keywords if kw not in _MOOD_WORDS and kw not in _TECHNICAL_WORDS]
     mood = [kw for kw in keywords if kw in _MOOD_WORDS]
