@@ -22,6 +22,7 @@ Safety:
     - Batch exiftool calls for speed (~100 files per batch)
 """
 
+import contextlib
 import json
 import os
 import platform
@@ -579,6 +580,134 @@ def extract_thumbnail_file_only(file_path, image_id):
     except (subprocess.TimeoutExpired, Exception):
         pass
     return image_id, None
+
+
+PREVIEW_MAX_DIM = 2048
+
+
+def _is_usable_jpeg(path: Path) -> bool:
+    """Check file is a valid JPEG (header check + minimum size)."""
+    try:
+        if path.stat().st_size < 32:
+            return False
+        with path.open("rb") as fh:
+            return fh.read(3) == b"\xff\xd8\xff"
+    except OSError:
+        return False
+
+
+def generate_preview(image_id, file_path, preview_dir, max_dim=PREVIEW_MAX_DIM):
+    """Generate a resized preview JPEG for a single image.
+
+    Returns Path to the preview file on success, None on failure.
+    Safe to call from threads — no DB writes.
+    """
+    preview_path = preview_dir / f"{image_id}.jpg"
+
+    if _is_usable_jpeg(preview_path):
+        return preview_path
+
+    fpath = Path(file_path)
+    if not fpath.exists():
+        return None
+
+    try:
+        ext = fpath.suffix.lower()
+        if ext in RAW_EXTENSIONS:
+            for tag in ["-JpgFromRaw", "-PreviewImage"]:
+                result = subprocess.run(
+                    ["exiftool", "-b", tag, str(fpath)],
+                    capture_output=True,
+                    timeout=15,
+                )
+                if result.stdout and len(result.stdout) > 1000:
+                    preview_path.write_bytes(result.stdout)
+                    _resize_thumbnail(preview_path, max_dim)
+                    if _is_usable_jpeg(preview_path):
+                        return preview_path
+        elif ext in JPEG_EXTENSIONS:
+            shutil.copy2(str(fpath), str(preview_path))
+            _resize_thumbnail(preview_path, max_dim)
+            if _is_usable_jpeg(preview_path):
+                return preview_path
+    except Exception:
+        pass
+
+    if preview_path.exists():
+        with contextlib.suppress(OSError):
+            preview_path.unlink()
+    return None
+
+
+def run_preview_backfill(preview_dir, max_dim=PREVIEW_MAX_DIM):
+    """Generate 2048px previews for all images missing one.
+
+    Returns dict with stats: total, generated, skipped, failed, elapsed.
+    """
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    conn = init_db()
+    rows = conn.execute(
+        "SELECT id, file_path, volume, relative_path FROM images"
+    ).fetchall()
+    conn.close()
+
+    preview_dir.mkdir(parents=True, exist_ok=True)
+
+    to_generate = []
+    skipped = 0
+    for row in rows:
+        preview_path = preview_dir / f"{row['id']}.jpg"
+        if _is_usable_jpeg(preview_path):
+            skipped += 1
+            continue
+        resolved = resolve_archive_file(
+            row["file_path"], row["volume"], row["relative_path"],
+            DEFAULT_VOLUMES, IGNORE_VOLUMES, VOLUME_ALIASES,
+        )
+        if resolved is None:
+            continue  # Volume not mounted — skip silently
+        to_generate.append((row["id"], str(resolved)))
+
+    total = len(to_generate)
+    if total == 0:
+        print(f"  All previews up to date ({skipped:,} cached).")
+        return {"total": len(rows), "generated": 0, "skipped": skipped, "failed": 0, "elapsed": 0.0}
+
+    print(f"\nGenerating {total:,} previews ({skipped:,} cached, {THUMB_WORKERS} workers)...")
+    start = time.time()
+    generated = 0
+    failed = 0
+
+    try:
+        from tqdm import tqdm
+        progress = tqdm(total=total, unit="img", desc="Previews")
+    except ImportError:
+        progress = None
+
+    with ThreadPoolExecutor(max_workers=THUMB_WORKERS) as executor:
+        futures = {
+            executor.submit(generate_preview, img_id, fpath, preview_dir, max_dim): img_id
+            for img_id, fpath in to_generate
+        }
+        for future in as_completed(futures):
+            try:
+                result = future.result()
+                if result is not None:
+                    generated += 1
+                else:
+                    failed += 1
+            except Exception:
+                failed += 1
+            if progress:
+                progress.update(1)
+
+    if progress:
+        progress.close()
+
+    elapsed = time.time() - start
+    print(f"  Done: {generated:,} generated, {failed:,} failed in {elapsed:.1f}s")
+    return {"total": len(rows), "generated": generated, "skipped": skipped, "failed": failed, "elapsed": elapsed}
 
 
 def _match_root_for_path(file_path, roots):

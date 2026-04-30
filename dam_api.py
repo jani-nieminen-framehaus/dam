@@ -47,6 +47,7 @@ from dam_config import (
     VOLUME_ALIASES,
 )
 from dam_db import get_db, serialize_vector, wal_checkpoint
+from dam_scanner import generate_preview
 from platform_utils import open_path_external, reveal_path_external
 from storage_utils import resolve_archive_file
 
@@ -303,7 +304,6 @@ def thumb(filename):
 
 PREVIEW_DIR = THUMB_DIR.parent / "previews"
 PREVIEW_DIR.mkdir(parents=True, exist_ok=True)
-_PREVIEW_MAX_DIM = 1600
 
 
 def _is_usable_jpeg(path: Path) -> bool:
@@ -319,7 +319,7 @@ def _is_usable_jpeg(path: Path) -> bool:
 
 @app.route("/api/previews/<int:image_id>.jpg")
 def preview(image_id):
-    """Serve a 1600px preview, generating on-demand if needed.
+    """Serve a 2048px preview, generating on-demand if needed.
 
     Falls back to the grid thumbnail when generation fails or the source
     file is unavailable.  The entire generation path is wrapped in a
@@ -330,9 +330,6 @@ def preview(image_id):
 
     if _is_usable_jpeg(preview_path):
         return send_file(str(preview_path), mimetype="image/jpeg")
-    if preview_path.exists():
-        with contextlib.suppress(OSError):
-            preview_path.unlink()
 
     try:
         db = _db()
@@ -344,31 +341,12 @@ def preview(image_id):
             row["file_path"], row["volume"], row["relative_path"], DEFAULT_VOLUMES, IGNORE_VOLUMES, VOLUME_ALIASES
         )
         if resolved is not None:
-            import platform
-            import shutil
-
-            ext = resolved.suffix.lower()
-            raw_extensions = {".arw", ".cr2", ".cr3", ".nef", ".orf", ".raf", ".rw2", ".dng", ".pef", ".srw"}
-
-            if ext in raw_extensions:
-                for tag in ["-JpgFromRaw", "-PreviewImage"]:
-                    result = subprocess.run(["exiftool", "-b", tag, str(resolved)], capture_output=True, timeout=15)
-                    if result.stdout and len(result.stdout) > 1000:
-                        preview_path.write_bytes(result.stdout)
-                        if platform.system() == "Darwin":
-                            subprocess.run(["sips", "-Z", str(_PREVIEW_MAX_DIM), str(preview_path)], capture_output=True, timeout=10)
-                        if _is_usable_jpeg(preview_path):
-                            return send_file(str(preview_path), mimetype="image/jpeg")
-            elif ext in (".jpg", ".jpeg"):
-                shutil.copy2(str(resolved), str(preview_path))
-                if platform.system() == "Darwin":
-                    subprocess.run(["sips", "-Z", str(_PREVIEW_MAX_DIM), str(preview_path)], capture_output=True, timeout=10)
-                if _is_usable_jpeg(preview_path):
-                    return send_file(str(preview_path), mimetype="image/jpeg")
+            result = generate_preview(image_id, str(resolved), PREVIEW_DIR)
+            if result is not None:
+                return send_file(str(result), mimetype="image/jpeg")
     except Exception:
         pass
 
-    # Final fallback: serve thumb if preview generation failed
     thumb_path = THUMB_DIR / f"{image_id}.jpg"
     if thumb_path.exists():
         return send_file(str(thumb_path), mimetype="image/jpeg")
