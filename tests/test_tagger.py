@@ -6,7 +6,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from dam_tagger import detect_bursts, select_candidate_rows, text_extract_keywords
+from dam_tagger import _select_input_image, detect_bursts, select_candidate_rows, text_extract_keywords
 
 # ── detect_bursts ─────────────────────────────────────────────────────────────
 
@@ -155,6 +155,56 @@ def test_keyword_parsing_malformed(monkeypatch):
     assert result["triptych_relevant"] is False
 
 
+def test_keyword_parsing_semicolon_separator(monkeypatch):
+    """Semicolons are accepted as separators, not embedded in one mega-keyword."""
+    monkeypatch.setattr(
+        "dam_tagger.ollama_post",
+        lambda *a, **kw: {"response": "chair; window; backlit; calm"},
+    )
+
+    result = text_extract_keywords("A chair by a window.")
+    assert "chair" in result["factual"]
+    assert "window" in result["factual"]
+    assert "calm" in result["mood"]
+    assert "backlit" in result["technical"]
+
+
+def test_keyword_parsing_drops_sentence_length_entries(monkeypatch):
+    """Long sentence-shaped entries are dropped (keep real keywords only)."""
+    monkeypatch.setattr(
+        "dam_tagger.ollama_post",
+        lambda *a, **kw: {
+            "response": "chair, this is a long sentence describing the scene in detail, window"
+        },
+    )
+
+    result = text_extract_keywords("A chair by a window.")
+    assert "chair" in result["factual"]
+    assert "window" in result["factual"]
+    # The sentence-shaped entry must not become a keyword.
+    all_kws = result["factual"] + result["mood"] + result["technical"]
+    assert not any("describing" in kw for kw in all_kws)
+
+
+def test_keyword_parsing_real_dam_tagger_garbage(monkeypatch):
+    """Real-world dam-tagger output with semicolons, double-dots, and sentence fragments."""
+    monkeypatch.setattr(
+        "dam_tagger.ollama_post",
+        lambda *a, **kw: {
+            "response": "dimly lit room; curtains partially drawn;; sofa ;woman sitting with her back to viewer.; patterned hat.. children's toys scattered on floor"
+        },
+    )
+
+    result = text_extract_keywords("A woman on a sofa.")
+    all_kws = result["factual"] + result["mood"] + result["technical"]
+    # Short, clean fragments survive
+    assert "dimly lit room" in all_kws
+    assert "sofa" in all_kws
+    # Truncated-sentence fragments (with internal dots or sentence-length) are dropped
+    assert not any(".." in kw for kw in all_kws)
+    assert not any(len(kw) > 40 for kw in all_kws)
+
+
 def test_select_candidate_rows_respects_manifest(db_conn, tmp_path):
     db_conn.execute(
         """INSERT INTO images
@@ -179,3 +229,59 @@ def test_select_candidate_rows_respects_manifest(db_conn, tmp_path):
     rows = select_candidate_rows(db_conn, manifest_path=manifest)
 
     assert [row["id"] for row in rows] == [2, 1]
+
+
+# ── _select_input_image ───────────────────────────────────────────────────────
+
+
+def test_select_input_image_prefers_preview(tmp_dam_root):
+    """When both preview and thumb exist, the 2048px preview wins."""
+    import dam_config
+
+    preview_dir = dam_config.THUMB_DIR.parent / "previews"
+    preview_dir.mkdir(parents=True, exist_ok=True)
+    dam_config.THUMB_DIR.mkdir(parents=True, exist_ok=True)
+
+    img_id = 42
+    preview = preview_dir / f"{img_id}.jpg"
+    preview.write_bytes(b"\xff\xd8\xff" + b"\x00" * 100)
+    thumb = dam_config.THUMB_DIR / f"{img_id}.jpg"
+    thumb.write_bytes(b"\xff\xd8\xff" + b"\x00" * 50)
+
+    assert _select_input_image(img_id) == preview
+
+
+def test_select_input_image_falls_back_to_thumb(tmp_dam_root):
+    """When only the thumb exists, fall back to it."""
+    import dam_config
+
+    dam_config.THUMB_DIR.mkdir(parents=True, exist_ok=True)
+    img_id = 7
+    thumb = dam_config.THUMB_DIR / f"{img_id}.jpg"
+    thumb.write_bytes(b"\xff\xd8\xff" + b"\x00" * 50)
+
+    assert _select_input_image(img_id) == thumb
+
+
+def test_select_input_image_returns_none_when_neither_exists(tmp_dam_root):
+    """No preview, no thumb → None (caller should skip)."""
+    import dam_config
+
+    dam_config.THUMB_DIR.mkdir(parents=True, exist_ok=True)
+    assert _select_input_image(999) is None
+
+
+def test_select_input_image_skips_corrupt_preview(tmp_dam_root):
+    """A preview file that's too small (failed generation marker) falls back to thumb."""
+    import dam_config
+
+    preview_dir = dam_config.THUMB_DIR.parent / "previews"
+    preview_dir.mkdir(parents=True, exist_ok=True)
+    dam_config.THUMB_DIR.mkdir(parents=True, exist_ok=True)
+
+    img_id = 13
+    (preview_dir / f"{img_id}.jpg").write_bytes(b"")  # zero-byte corrupt
+    thumb = dam_config.THUMB_DIR / f"{img_id}.jpg"
+    thumb.write_bytes(b"\xff\xd8\xff" + b"\x00" * 50)
+
+    assert _select_input_image(img_id) == thumb

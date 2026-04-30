@@ -3,11 +3,14 @@
 DAM Tagger — AI keywording + semantic search embeddings
 
 Pipeline per image:
-  1. Load thumbnail (never touches RAW)
-  2. LLaVA 34b → documentary description
-  3. dam-tagger (fine-tuned Mistral 7B) → keyword extraction in photographer's style
-  4. nomic-embed-text → 768-dim embedding for semantic search
+  1. Load image (2048px lightbox preview if cached, else 300px thumb — never RAW)
+  2. VISION_MODEL (e.g. qwen2.5vl) → documentary description
+  3. TEXT_MODEL (fine-tuned Mistral 7B "dam-tagger") → keyword extraction in photographer's style
+  4. EMBED_MODEL (nomic-embed-text) → 768-dim embedding of the description for semantic search
   5. Write description + keywords + embedding back to DB
+
+Models are resolved from ~/.dam/config.json (vision_model / text_model / embed_model).
+Endpoints can be split via ollama_base_vision / ollama_base_text / ollama_base_embed.
 
 Usage:
     python3 dam_tagger.py                        # tag all untagged
@@ -17,9 +20,6 @@ Usage:
     python3 dam_tagger.py --camera S1IIE         # only one body
     python3 dam_tagger.py --retag                # redo already-tagged images
     python3 dam_tagger.py --search "isolation"   # semantic search demo (no tagging)
-
-Models required (must be in Ollama):
-    ollama list should show: llava:34b, dam-tagger, nomic-embed-text
 """
 
 import base64
@@ -46,7 +46,6 @@ from dam_config import (
     TAGGER_STATUS_FILE,
     TAGGER_WORKERS,
     TEXT_MODEL,
-    THUMB_DIR,
     VISION_MODEL,
 )
 from dam_db import get_db, serialize_vector, wal_checkpoint
@@ -151,7 +150,14 @@ _TECHNICAL_WORDS = {
 
 
 def _parse_raw_keywords(raw):
-    """Parse comma-separated model output into deduplicated keyword list (max 12)."""
+    """Parse model output into deduplicated keyword list (max 12).
+
+    Tolerates comma OR semicolon separators. Drops entries that look like
+    sentences rather than keywords: too long, or containing internal periods
+    (a sign of a truncated sentence the model emitted instead of a tag).
+    """
+    import re
+
     for stop_char in ("\n", ")", "Technical", "Note"):
         idx = raw.find(stop_char)
         if idx > 0:
@@ -159,11 +165,18 @@ def _parse_raw_keywords(raw):
 
     seen = set()
     keywords = []
-    for kw in raw.split(","):
-        kw = kw.strip().strip('"').strip("'").strip().lower()
-        if kw and len(kw) > 1 and kw not in seen:
-            seen.add(kw)
-            keywords.append(kw)
+    for kw in re.split(r"[,;]+", raw):
+        kw = kw.strip().strip('"').strip("'").strip(".:! ").strip().lower()
+        if not kw or len(kw) <= 1:
+            continue
+        if len(kw) > 40:  # sentence-shaped, not a keyword
+            continue
+        if "." in kw:  # internal period → truncated sentence
+            continue
+        if kw in seen:
+            continue
+        seen.add(kw)
+        keywords.append(kw)
     return keywords[:12], seen
 
 
@@ -445,9 +458,27 @@ def _warm_models():
     print("  ✓ All models loaded\n")
 
 
-def _ai_pipeline(image_id, thumb_path):
+def _select_input_image(image_id):
+    """Return the best available input image for the VLM.
+
+    Prefers the 2048px lightbox preview (sharper → better descriptions).
+    Falls back to the 300px grid thumb if the preview is missing or corrupt.
+    Returns None when neither exists, signalling the caller to skip.
+    """
+    import dam_config
+
+    preview_path = dam_config.THUMB_DIR.parent / "previews" / f"{image_id}.jpg"
+    if preview_path.exists() and preview_path.stat().st_size > 32:
+        return preview_path
+    thumb_path = dam_config.THUMB_DIR / f"{image_id}.jpg"
+    if thumb_path.exists():
+        return thumb_path
+    return None
+
+
+def _ai_pipeline(image_id, input_path):
     """Run vision + keywords + embed for one image. Thread-safe (no DB writes, no printing)."""
-    img_b64 = base64.b64encode(thumb_path.read_bytes()).decode()
+    img_b64 = base64.b64encode(input_path.read_bytes()).decode()
 
     t0 = time.time()
     description = vision_describe(img_b64)
@@ -484,9 +515,9 @@ def _write_tag_results(conn, image_id, description, kw_dict, blob):
     conn.commit()
 
 
-def _tag_single_image(conn, image_id, thumb_path, verbose):
+def _tag_single_image(conn, image_id, input_path, verbose):
     """Run full AI pipeline with DB writes and optional verbose output. Sequential mode only."""
-    description, kw_dict, blob, t_vision, t_kw, t_embed = _ai_pipeline(image_id, thumb_path)
+    description, kw_dict, blob, t_vision, t_kw, t_embed = _ai_pipeline(image_id, input_path)
 
     if verbose:
         print(f"\n  DESCRIPTION ({t_vision:.1f}s):")
@@ -541,15 +572,15 @@ def _tag_loop_sequential(conn, rows, burst_map, total, verbose):
     start = time.time()
 
     for idx, row in enumerate(rows, 1):
-        thumb_path = THUMB_DIR / f"{row['id']}.jpg"
-        if not thumb_path.exists():
-            print(f"  [{idx}/{total}] SKIP (no thumb): {row['file_name']}")
+        input_path = _select_input_image(row["id"])
+        if input_path is None:
+            print(f"  [{idx}/{total}] SKIP (no preview/thumb): {row['file_name']}")
             continue
 
         print(f"[{idx}/{total}] {row['file_name']}  {(row['date_taken'] or '')[:10]}  {row['camera_short'] or '?'}")
 
         try:
-            description, kw_dict, blob, t_vision, t_kw, t_embed = _tag_single_image(conn, row["id"], thumb_path, verbose)
+            description, kw_dict, blob, t_vision, t_kw, t_embed = _tag_single_image(conn, row["id"], input_path, verbose)
             tagged += 1
             all_kws = (
                 kw_dict.get("factual", []) + kw_dict.get("mood", []) + kw_dict.get("technical", [])
@@ -596,21 +627,21 @@ def _tag_loop_parallel(conn, rows, burst_map, total, workers):
     errors = 0
     start = time.time()
 
-    # Pre-filter rows with thumbnails
+    # Pre-filter rows that have either a preview or a thumb
     work = []
     for idx, row in enumerate(rows, 1):
-        thumb_path = THUMB_DIR / f"{row['id']}.jpg"
-        if not thumb_path.exists():
-            print(f"  [{idx}/{total}] SKIP (no thumb): {row['file_name']}")
+        input_path = _select_input_image(row["id"])
+        if input_path is None:
+            print(f"  [{idx}/{total}] SKIP (no preview/thumb): {row['file_name']}")
             continue
-        work.append((idx, row, thumb_path))
+        work.append((idx, row, input_path))
 
     print(f"  Parallel mode: {workers} workers, {len(work)} images queued\n")
 
     with ThreadPoolExecutor(max_workers=workers) as executor:
         futures = {
-            executor.submit(_ai_pipeline, row["id"], thumb_path): (idx, row)
-            for idx, row, thumb_path in work
+            executor.submit(_ai_pipeline, row["id"], input_path): (idx, row)
+            for idx, row, input_path in work
         }
 
         for future in as_completed(futures):
