@@ -62,6 +62,12 @@ TRIPTYCH_THEMES = {"care", "aging", "memory", "family", "illness", "passage of t
                    "elderly", "hospital", "grief", "waiting", "dignity", "hands",
                    "vulnerability", "tenderness", "intimacy", "nurturing", "protection"}
 
+# Text and embed calls handle short prompts (<500 tokens). Capping num_ctx
+# prevents Ollama from allocating dam-tagger's 32k native context window per
+# request, which on a 7B model wastes ~7GB of KV cache that's never used —
+# memory we'd rather give back to the 48GB vision model.
+TEXT_CTX = 2048
+
 
 # ── Ollama API ─────────────────────────────────────────────────────────────────
 
@@ -215,7 +221,12 @@ def text_extract_keywords(description, technical="", context=""):
     )
     resp = ollama_post(
         "/api/generate",
-        {"model": TEXT_MODEL, "prompt": prompt, "stream": False, "options": {"num_predict": 80}},
+        {
+            "model": TEXT_MODEL,
+            "prompt": prompt,
+            "stream": False,
+            "options": {"num_predict": 80, "num_ctx": TEXT_CTX},
+        },
         timeout=60,
         base_url=OLLAMA_BASE_TEXT,
     )
@@ -480,7 +491,7 @@ def _warm_models():
     )
     ollama_post(
         "/api/generate",
-        {"model": TEXT_MODEL, "prompt": "warmup", "stream": False, "options": {"num_predict": 1, "num_ctx": MODEL_CTX}},
+        {"model": TEXT_MODEL, "prompt": "warmup", "stream": False, "options": {"num_predict": 1, "num_ctx": TEXT_CTX}},
         timeout=120, base_url=OLLAMA_BASE_TEXT,
     )
     print("  ✓ All models loaded\n")
