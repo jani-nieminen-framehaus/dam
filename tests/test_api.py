@@ -501,6 +501,21 @@ def test_preview_invalid_cache_falls_back_to_thumbnail(tmp_dam_root, app_client)
     assert resp.data.startswith(b"\xff\xd8\xff")
 
 
+def test_preview_serves_cached_valid_jpeg(tmp_dam_root, app_client):
+    """GET /api/previews/<id>.jpg serves a cached preview directly."""
+    img_id = _insert_test_image(tmp_dam_root)
+    import dam_api
+
+    dam_api.PREVIEW_DIR.mkdir(parents=True, exist_ok=True)
+    preview = dam_api.PREVIEW_DIR / f"{img_id}.jpg"
+    preview.write_bytes(b"\xff\xd8\xff" + b"\x00" * 100)
+
+    resp = app_client.get(f"/api/previews/{img_id}.jpg")
+
+    assert resp.status_code == 200
+    assert resp.data[:3] == b"\xff\xd8\xff"
+
+
 # ── Apps endpoint ────────────────────────────────────────────────────────────
 
 
