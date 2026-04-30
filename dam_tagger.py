@@ -225,7 +225,7 @@ def text_extract_keywords(description, technical="", context=""):
             "model": TEXT_MODEL,
             "prompt": prompt,
             "stream": False,
-            "options": {"num_predict": 80, "num_ctx": TEXT_CTX},
+            "options": {"num_ctx": TEXT_CTX},
         },
         timeout=60,
         base_url=OLLAMA_BASE_TEXT,
