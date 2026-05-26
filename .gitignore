@@ -41,3 +41,22 @@ ingest_status.json
 # Frontend
 frontend/node_modules/
 frontend/.vite/
+
+# Pre-SigLIP migration backups (local only)
+*.pre-siglip
+*.pre-siglip-migration
+*.backup.json
+
+# AI/editor tooling state
+.ai/
+.junie/
+.claude/
+
+# Runtime status pulses (generated)
+tagger_status.json
+vlm_status.json
+last_ingest.json
+
+# Session scratch (local)
+SESSION_HANDOFF.mk
+previews/

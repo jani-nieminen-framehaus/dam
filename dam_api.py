@@ -36,20 +36,19 @@ from flask import Flask, abort, g, jsonify, request, send_file, send_from_direct
 
 from dam_config import (
     DEFAULT_VOLUMES,
-    EMBED_MODEL,
     IGNORE_VOLUMES,
     INGEST_STATUS_FILE,
-    OLLAMA_BASE_EMBED,
     PAGE_SIZE,
     SPA_DIR,
     TAGGER_STATUS_FILE,
     THUMB_DIR,
     VOLUME_ALIASES,
 )
-from dam_db import get_db, serialize_vector, wal_checkpoint
+from dam_db import get_db, wal_checkpoint
 from dam_scanner import generate_preview
 from platform_utils import open_path_external, reveal_path_external
 from storage_utils import resolve_archive_file
+import dam_siglip
 
 app = Flask(__name__, static_folder=None)
 
@@ -362,7 +361,7 @@ def _normalize_cursor_value(sort_by, value):
 
 @app.route("/api/images", methods=["GET"])
 def images():
-    limit = min(int(request.args.get("limit", PAGE_SIZE)), 200)
+    limit = min(int(request.args.get("limit", PAGE_SIZE)), 1000)
     where, params = build_filters(request.args)
 
     # Sort
@@ -421,27 +420,21 @@ def images():
 # ── AI Embeddings ─────────────────────────────────────────────────────────────
 
 
-def get_embedding(text, max_retries=3):
-    """Fetch embedding from local Ollama instance with retry."""
-    import time
+def get_embedding(text):
+    """Encode a search query into a 1152-dim SigLIP text embedding.
 
-    url = f"{OLLAMA_BASE_EMBED}/api/embeddings"
-    payload = json.dumps({"model": EMBED_MODEL, "prompt": text}).encode()
-    req = urllib.request.Request(url, data=payload, headers={"Content-Type": "application/json"}, method="POST")
+    Returns list of floats on success, None on failure. Same return contract
+    as the previous Ollama-backed function so the search route is unchanged.
 
-    for attempt in range(max_retries):
-        try:
-            with urllib.request.urlopen(req, timeout=30) as resp:
-                data = json.loads(resp.read().decode())
-                return data.get("embedding", [])
-        except urllib.error.URLError as e:
-            if attempt < max_retries - 1:
-                wait = 2 ** attempt
-                print(f"Ollama retry {attempt + 1}/{max_retries} in {wait}s: {e}")
-                time.sleep(wait)
-            else:
-                print(f"Ollama unreachable after {max_retries} attempts: {e}")
-                return None
+    The SigLIP model is loaded lazily on first call and cached for the life
+    of the Flask process. First call adds ~3-4 seconds; subsequent calls are
+    sub-100ms.
+    """
+    try:
+        return dam_siglip.encode_text(text)
+    except Exception as e:
+        print(f"SigLIP text encode failed: {e}")
+        return None
 
 
 @app.route("/api/search", methods=["GET"])
@@ -450,16 +443,16 @@ def search():
     if not query:
         return jsonify({"images": [], "next_cursor": None, "total_filtered": 0})
 
-    limit = min(int(request.args.get("limit", PAGE_SIZE)), 200)
+    limit = min(int(request.args.get("limit", PAGE_SIZE)), 1000)
 
-    # 1. Get embedding for query
+    # 1. Get embedding for query (SigLIP text encoder, 1152-dim)
     embedding = get_embedding(query)
     if not embedding:
-        return jsonify({"error": "Failed to generate embedding via Ollama"}), 500
+        return jsonify({"error": "Failed to generate query embedding (SigLIP)"}), 500
 
-    blob = serialize_vector(embedding)
+    blob = dam_siglip.serialize_embedding(embedding)
 
-    # 2. Search sqlite-vec
+    # 2. Search sqlite-vec (1152-dim SigLIP table)
     sql = """
         SELECT i.*,
             e.distance as _distance,
@@ -469,7 +462,7 @@ def search():
                 FILTER (WHERE s.name IS NOT NULL), '[]') AS subjects,
             COALESCE(json_group_array(DISTINCT k.keyword)
                 FILTER (WHERE k.keyword IS NOT NULL), '[]') AS keywords
-        FROM image_embeddings e
+        FROM image_embeddings_siglip e
         JOIN images i ON i.id = e.image_id
         LEFT JOIN image_projects ip  ON i.id = ip.image_id
         LEFT JOIN projects p         ON ip.project_id = p.id
@@ -577,6 +570,7 @@ def image_delete(image_id):
         abort(404)
     # CASCADE deletes handle join tables; clean up embeddings and thumbnails too
     db.execute("DELETE FROM image_embeddings WHERE image_id = ?", (image_id,))
+    db.execute("DELETE FROM image_embeddings_siglip WHERE image_id = ?", (image_id,))
     db.execute("DELETE FROM thumbnails WHERE image_id = ?", (image_id,))
     db.execute("DELETE FROM images WHERE id = ?", (image_id,))
     db.commit()
@@ -602,6 +596,7 @@ def images_bulk_delete():
     db = _db()
     for img_id in ids:
         db.execute("DELETE FROM image_embeddings WHERE image_id = ?", (int(img_id),))
+        db.execute("DELETE FROM image_embeddings_siglip WHERE image_id = ?", (int(img_id),))
         db.execute("DELETE FROM thumbnails WHERE image_id = ?", (int(img_id),))
         db.execute("DELETE FROM images WHERE id = ?", (int(img_id),))
     db.commit()

@@ -9,14 +9,14 @@ export function useSearch(query: string) {
   const result = useQuery({
     queryKey: ['search', query],
     queryFn: () =>
-      apiFetch<ImagesResponse>(`/search?q=${encodeURIComponent(query)}&limit=200`),
+      apiFetch<ImagesResponse>(`/search?q=${encodeURIComponent(query)}&limit=1000`),
     enabled: query.length > 0,
     retry: false,
   })
 
   useEffect(() => {
     if (result.isError) {
-      addToast('Search unavailable — is Ollama running?', 'warning')
+      addToast('Search unavailable — SigLIP embedder failed to load', 'warning')
     }
   }, [result.isError, addToast])
 

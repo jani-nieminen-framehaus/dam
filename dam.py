@@ -98,6 +98,36 @@ def cmd_search(args):
     sys.exit(run(search_cmd, "Semantic Search"))
 
 
+DESCRIBER_SCRIPT = Path(__file__).parent / "tools" / "describe_all.py"
+
+
+def cmd_describe(args):
+    """Run Qwen 2.5 VL description pass over images with described_at IS NULL.
+    Newest-first, killable, resumable. Lockfile prevents double-start."""
+    background = "--background" in args
+    pass_through = [a for a in args if a != "--background"]
+    desc_cmd = [sys.executable, str(DESCRIBER_SCRIPT), *pass_through]
+
+    if not background:
+        sys.exit(run(desc_cmd, "Describing pending images with Qwen 2.5 VL"))
+
+    # Detached background launch — process keeps running after terminal closes
+    log_path = DAM_ROOT / "vlm_describer.log"
+    log_fh = open(log_path, "a", buffering=1)
+    proc = subprocess.Popen(
+        desc_cmd,
+        stdout=log_fh,
+        stderr=subprocess.STDOUT,
+        stdin=subprocess.DEVNULL,
+        start_new_session=True,  # new session, no SIGHUP when terminal closes
+    )
+    print(f"DAM ── Background describer started (pid {proc.pid})")
+    print(f"  log:        {log_path}")
+    print(f"  status:     {DAM_ROOT / 'vlm_status.json'}")
+    print(f"  stop:       kill {proc.pid}     (graceful: finishes current image)")
+    print(f"  tail logs:  tail -f {log_path}")
+
+
 def _parse_port(args):
     """Extract port from args, defaulting to configured PORT."""
     for i, a in enumerate(args):
@@ -501,6 +531,7 @@ COMMANDS = {
     "previews": cmd_previews,
     "stats": cmd_stats,
     "tag": cmd_tag,
+    "describe": cmd_describe,
     "search": cmd_search,
     "serve": cmd_serve,
     "export": cmd_export,
@@ -517,6 +548,8 @@ Commands:
   previews                             Generate missing 2048px lightbox previews
   stats                                Show database statistics
   tag [--sample N] [--limit N]         AI tag images (burst stacking ON by default)
+  describe [--background] [--limit N]  Qwen 2.5 VL pass over described_at IS NULL
+                                       (newest first; --background detaches)
   search "query"                       Semantic search across tagged images
   serve [--port 5001] [--window]       Start web API & open local desktop window
   export --dest PATH [--rating N]     Export picks to folder (--pick, --edit-status, --format, --dry-run)

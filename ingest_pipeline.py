@@ -18,6 +18,7 @@ _SCRIPT_ROOT = Path(sys._MEIPASS) if getattr(sys, "frozen", False) else DAM_ROOT
 INGEST_SCRIPT = _SCRIPT_ROOT / "card_ingest.py"
 SCANNER_SCRIPT = _SCRIPT_ROOT / "dam_scanner.py"
 TAGGER_SCRIPT = _SCRIPT_ROOT / "dam_tagger.py"
+DESCRIBER_SCRIPT = _SCRIPT_ROOT / "tools" / "describe_all.py"
 
 Announce = Callable[[str], None]
 
@@ -75,7 +76,13 @@ def _remaining_timeout(total_timeout: float | None, start: float, cmd: list[str]
 
 
 def launch_background_tagger(*, python: str | None = None, announce: Announce | None = _default_announce) -> None:
-    """Launch AI tagging for the latest ingest manifest in a detached process."""
+    """Launch AI tagging for the latest ingest manifest in a detached process.
+
+    RETIRED from the live ingest pipeline as of Phase 7. The function is kept
+    available for manual invocation, but the pipeline now calls
+    launch_background_describer() instead. LLaVA-via-Ollama produced
+    hallucinated descriptions (well-documented in the REBUILD_RESUME audit).
+    """
     if announce:
         announce("\nDAM ── STEP 5/5 — AI Tagging (background)\n" + "-" * 50)
     tag_log = DAM_ROOT / "tagger_run.log"
@@ -86,6 +93,27 @@ def launch_background_tagger(*, python: str | None = None, announce: Announce | 
     if announce:
         announce(f"  Tagger launched in background. Monitor: tail -f {tag_log}")
         announce("\nIngest complete. AI tagging running in background.")
+
+
+def launch_background_describer(*, python: str | None = None, announce: Announce | None = _default_announce) -> None:
+    """Launch Qwen 2.5 VL describer in a detached process.
+
+    The describer queries the DB directly for pending images
+    (described_at IS NULL, ordered newest-first), so any rows just inserted
+    by the preceding ingest steps will be at the top of its queue. If a
+    describer is already running, its lockfile causes this launch to detect
+    that and exit cleanly without double-loading the model — the already-
+    running instance picks up the new rows automatically on its next iteration.
+    """
+    if announce:
+        announce("\nDAM ── STEP 5/5 — AI Description (Qwen, background)\n" + "-" * 50)
+    desc_log = DAM_ROOT / "vlm_describer.log"
+    desc_cmd = [python or sys.executable, str(DESCRIBER_SCRIPT)]
+    spawn_background_process(desc_cmd, desc_log, cwd=DAM_ROOT)
+    if announce:
+        announce(f"  Describer launched in background. Monitor: tail -f {desc_log}")
+        announce(f"  Status:  {DAM_ROOT / 'vlm_status.json'}")
+        announce("\nIngest complete. Qwen description running in background.")
 
 
 def run_ingest_pipeline(
@@ -178,10 +206,10 @@ def run_ingest_pipeline(
 
     if no_tag:
         if announce:
-            announce("\nIngest complete (AI tagging skipped).")
+            announce("\nIngest complete (AI description skipped).")
         result.elapsed = time.time() - start
         return result
 
-    launch_background_tagger(python=py, announce=announce)
+    launch_background_describer(python=py, announce=announce)
     result.elapsed = time.time() - start
     return result

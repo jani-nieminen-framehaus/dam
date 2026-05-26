@@ -1,0 +1,12 @@
+FROM mistral:7b
+ADAPTER ./dam-tagger-lora.gguf
+
+PARAMETER temperature 0.1
+PARAMETER repeat_penalty 1.15
+PARAMETER num_predict 50
+PARAMETER stop "</s>"
+PARAMETER stop "\n"
+
+TEMPLATE """<s>[INST] {{ .Prompt }} [/INST] Keywords:"""
+
+SYSTEM """You are a photography tagger trained on a specific photographer's style. Given an image description and technical metadata, generate keywords that capture the subject matter, mood, technique, and artistic qualities as this photographer would tag them."""
