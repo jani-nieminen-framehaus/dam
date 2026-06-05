@@ -15,12 +15,14 @@ from pathlib import Path
 
 import sqlite_vec
 
-sys.path.insert(0, "/Users/janinieminen/Documents/dam")
+# Make the repo root importable so dam_config / dam_siglip resolve cross-platform
+# (replaces the previous hardcoded /Users/janinieminen/Documents/dam path).
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from dam_config import DAM_ROOT, DB_PATH, THUMB_DIR
 import dam_siglip
 
-DB = Path(os.path.expanduser("~/.dam/dam.db"))
-PREVIEW_DIR = Path("/Users/janinieminen/Documents/dam/previews")
-THUMB_DIR = Path("/Users/janinieminen/Documents/dam/thumbs")
+DB = DB_PATH
+PREVIEW_DIR = DAM_ROOT / "previews"
 
 INFERENCE_BATCH = 32
 OUTER_CHUNK = 256

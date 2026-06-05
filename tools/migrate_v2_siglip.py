@@ -19,14 +19,15 @@ the old pipeline (if anyone ever runs it again) continues to write to old.
 Bumps user_version from 1 -> 2. Idempotent — safe to run twice (uses IF NOT
 EXISTS everywhere). Wrapped in transaction. Aborts if user_version != 1.
 """
-import os
 import sqlite3
 import sys
 import sqlite_vec
 from pathlib import Path
 
-# Resolve through symlink — the real DB is at ~/.dam/dam.db
-DB_PATH = Path(os.path.expanduser("~/.dam/dam.db"))
+# Use dam_config so this works cross-platform (was hardcoded ~/.dam/dam.db).
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from dam_config import DB_PATH
+
 assert DB_PATH.exists(), f"DB not found at {DB_PATH}"
 
 EXPECTED_VERSION_BEFORE = 1

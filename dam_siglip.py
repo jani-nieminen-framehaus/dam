@@ -247,7 +247,15 @@ def classify_image(
 def load_vocabulary(path: Path | str | None = None) -> list[str]:
     """Load the 'all' flat list from dam_vocabulary.json."""
     if path is None:
-        path = Path(os.path.expanduser("~/Documents/dam/dam_vocabulary.json"))
+        # Resolve via dam_config so this respects a configured dam_root
+        # cross-platform; fall back to the legacy default if dam_config can't be
+        # imported (keeps this module standalone-usable).
+        try:
+            from dam_config import DAM_ROOT
+
+            path = DAM_ROOT / "dam_vocabulary.json"
+        except Exception:
+            path = Path(os.path.expanduser("~/Documents/dam/dam_vocabulary.json"))
     path = Path(path)
     with path.open() as f:
         data = json.load(f)
