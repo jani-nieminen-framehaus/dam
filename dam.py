@@ -1,7 +1,7 @@
-#!/opt/homebrew/bin/python3
-# NOTE: Always invoke with /opt/homebrew/bin/python3 or via shebang.
-# System python3 resolves to /Library/Frameworks/Python.framework which
-# lacks sqlite_vec and other DAM dependencies.
+#!/usr/bin/env python3
+# NOTE: Run under the project's virtualenv (uv/venv) so sqlite_vec and the other
+# DAM dependencies are importable. On macOS the system framework Python lacks them;
+# on Linux the distro python3 generally lacks sqlite_vec unless installed in the venv.
 """
 DAM Orchestrator — unified entry point for the photo DAM system.
 
@@ -43,7 +43,7 @@ from dam_config import (
     cmd_config,
 )
 from ingest_pipeline import SCANNER_SCRIPT, TAGGER_SCRIPT, run_ingest_pipeline
-from platform_utils import open_path_external
+from platform_utils import is_linux, open_path_external
 from storage_utils import resolve_archive_file
 
 
@@ -320,7 +320,34 @@ def _serve_window(port):
             w.maximize()
 
     window.events.loaded += _on_loaded
-    webview.start(menu=menu_items)
+
+    try:
+        webview.start(menu=menu_items)
+    except Exception as exc:
+        # No usable pywebview GUI backend (common on minimal Linux installs without
+        # WebKit2GTK or QtWebEngine). The Flask server thread is already serving, so
+        # fall back to the system browser instead of crashing.
+        print(f"  Desktop window unavailable ({exc.__class__.__name__}: {exc}).")
+        if is_linux():
+            print("  For a native window, install a pywebview backend, e.g.:")
+            print("    Arch:   sudo pacman -S python-gobject webkit2gtk-4.1")
+            print("    Debian: sudo apt install python3-gi gir1.2-webkit2-4.1")
+        print("  Opening in your web browser instead.")
+        _open_in_browser_and_block(url)
+
+
+def _open_in_browser_and_block(url):
+    """Open the DAM web UI in the default browser and keep the server thread alive."""
+    import time
+    import webbrowser
+
+    webbrowser.open(url)
+    print(f"  Serving at {url} — press Ctrl+C to stop.")
+    try:
+        while True:
+            time.sleep(3600)
+    except KeyboardInterrupt:
+        pass
 
 
 def _menu_ingest(win_ref):

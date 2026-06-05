@@ -151,7 +151,7 @@ class IngestMonitorWindow(QDialog):
         log_label.setStyleSheet(f"color: {TEXT_DIM}; font-size: 10px;")
         log_row.addWidget(log_label)
         log_row.addStretch()
-        log_btn = QPushButton("Open in Finder")
+        log_btn = QPushButton("Reveal Folder")
         log_btn.setStyleSheet(
             f"QPushButton {{ color: {ACCENT}; background: transparent; border: none;"
             f" font-size: 10px; text-decoration: underline; }}"

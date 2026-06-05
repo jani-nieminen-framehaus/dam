@@ -4,7 +4,7 @@ from pathlib import Path
 from subprocess import CompletedProcess
 
 
-def test_ingest_pipeline_runs_copy_scan_thumbs_and_background_tagger(monkeypatch, tmp_path):
+def test_ingest_pipeline_runs_copy_scan_thumbs_and_background_describer(monkeypatch, tmp_path):
     import ingest_pipeline
 
     calls = []
@@ -12,11 +12,8 @@ def test_ingest_pipeline_runs_copy_scan_thumbs_and_background_tagger(monkeypatch
 
     monkeypatch.setattr(ingest_pipeline, "INGEST_SCRIPT", Path("/app/card_ingest.py"))
     monkeypatch.setattr(ingest_pipeline, "SCANNER_SCRIPT", Path("/app/dam_scanner.py"))
-    monkeypatch.setattr(ingest_pipeline, "TAGGER_SCRIPT", Path("/app/dam_tagger.py"))
+    monkeypatch.setattr(ingest_pipeline, "DESCRIBER_SCRIPT", Path("/app/tools/describe_all.py"))
     monkeypatch.setattr(ingest_pipeline, "DAM_ROOT", tmp_path)
-    manifest = tmp_path / "last_ingest.json"
-    manifest.write_text("{}")
-    monkeypatch.setattr(ingest_pipeline, "LAST_INGEST_FILE", manifest)
 
     def fake_run(cmd, **kwargs):
         calls.append((cmd, kwargs))
@@ -42,10 +39,11 @@ def test_ingest_pipeline_runs_copy_scan_thumbs_and_background_tagger(monkeypatch
         ["/python", "/app/dam_scanner.py", "--no-thumbs"],
         ["/python", "/app/dam_scanner.py", "--no-scan"],
     ]
+    # Phase 7: the live pipeline spawns the Qwen describer, not the retired dam_tagger.
     assert spawned == [
         (
-            ["/python", "/app/dam_tagger.py", "--manifest", str(manifest)],
-            tmp_path / "tagger_run.log",
+            ["/python", "/app/tools/describe_all.py"],
+            tmp_path / "vlm_describer.log",
             tmp_path,
         )
     ]

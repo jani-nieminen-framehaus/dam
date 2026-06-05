@@ -1,4 +1,4 @@
-#!/opt/homebrew/bin/python3
+#!/usr/bin/env python3
 """
 DAM API — Flask JSON API + static file server
 Run: gunicorn -w 4 -b 0.0.0.0:5000 dam_api:app
@@ -34,6 +34,7 @@ from pathlib import Path
 
 from flask import Flask, abort, g, jsonify, request, send_file, send_from_directory
 
+import dam_siglip
 from dam_config import (
     DEFAULT_VOLUMES,
     IGNORE_VOLUMES,
@@ -46,9 +47,8 @@ from dam_config import (
 )
 from dam_db import get_db, wal_checkpoint
 from dam_scanner import generate_preview
-from platform_utils import open_path_external, reveal_path_external
+from platform_utils import list_desktop_apps, open_path_external, reveal_path_external
 from storage_utils import resolve_archive_file
-import dam_siglip
 
 app = Flask(__name__, static_folder=None)
 
@@ -223,33 +223,30 @@ def favicon():
 
 @app.route("/api/apps", methods=["GET"])
 def list_apps():
-    """List installed macOS applications suitable for opening media files.
+    """List installed applications suitable for opening media files.
 
-    Returns apps split into 'photo_apps' (known photo/video editors) and 'other'.
+    Returns apps split into 'photo_apps' (known photo/video editors) and the full list.
+    macOS lists /Applications bundles; Linux lists known media executables found on
+    PATH; Windows returns an empty list (handled in list_desktop_apps).
     """
-    apps_dir = Path("/Applications")
-    if not apps_dir.is_dir():
+    all_names = list_desktop_apps()
+    if not all_names:
         return jsonify({"apps": [], "photo_apps": []})
 
-    # Known photo/video app bundle stems (case-insensitive matching)
+    # Known photo/video app names (case-insensitive substring matching).
     _PHOTO_KEYWORDS = {
+        # macOS bundle names
         "capture one", "dxo", "photolab", "filmpack", "davinci",
         "lightroom", "photoshop", "affinity", "darktable", "rawtherapee",
         "gimp", "acorn", "pixelmator", "preview", "darkroom", "raw power",
         "iridient", "nik collection", "xnviewmp", "graphicconverter",
         "rapidraw", "rawdigger", "apolloone", "peakto",
+        # Linux executables
+        "art", "krita", "digikam", "gwenview", "nomacs", "geeqie",
+        "gthumb", "shotwell", "eog", "photoflow", "luminance",
     }
 
-    all_names = sorted(p.stem for p in apps_dir.glob("*.app"))
-    photo_apps = []
-    other_apps = []
-    for name in all_names:
-        lower = name.lower()
-        if any(kw in lower for kw in _PHOTO_KEYWORDS):
-            photo_apps.append(name)
-        else:
-            other_apps.append(name)
-
+    photo_apps = [name for name in all_names if any(kw in name.lower() for kw in _PHOTO_KEYWORDS)]
     return jsonify({"apps": all_names, "photo_apps": photo_apps})
 
 
@@ -805,7 +802,7 @@ def image_open_jpeg(image_id):
 
 @app.route("/api/images/<int:image_id>/reveal", methods=["POST"])
 def image_reveal(image_id):
-    """Reveal the image file in Finder — always works regardless of app."""
+    """Reveal the image file in the system file manager — always works regardless of app."""
     db = _db()
     row = db.execute("SELECT file_path, volume, relative_path FROM images WHERE id = ?", (image_id,)).fetchone()
 

@@ -1,4 +1,4 @@
-#!/opt/homebrew/bin/python3
+#!/usr/bin/env python3
 """
 DAM Scanner — Phase 1
 Walks photo volumes, extracts EXIF via exiftool, populates SQLite.
@@ -543,8 +543,11 @@ def _resize_thumbnail(thumb_path, max_dim=300):
             img = Image.open(thumb_path)
             img.thumbnail((max_dim, max_dim))
             img.save(thumb_path)
-        except ImportError:
-            pass  # no resize available — thumbnail will be full size
+        except Exception:
+            # Best-effort, matching macOS `sips`: if Pillow is missing or the file
+            # can't be decoded, leave the original (still-valid) image unresized
+            # rather than failing the whole thumbnail/preview.
+            pass
 
 
 def extract_thumbnail_file_only(file_path, image_id):

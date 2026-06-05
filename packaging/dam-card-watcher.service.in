@@ -1,0 +1,16 @@
+[Unit]
+Description=DAM SD/CFexpress card watcher — auto-ingest on card insert
+# Linux replacement for the macOS LaunchAgent. Polls mounted volumes (udisks2
+# mounts under /run/media/<user>) for a DCIM folder and fires the ingest pipeline.
+After=graphical-session.target
+
+[Service]
+Type=simple
+# bash -lc gives a login PATH so `uv` (in ~/.local/bin) and the venv resolve,
+# regardless of whether @PY@ is "uv run python", a venv python, or system python3.
+ExecStart=/usr/bin/env bash -lc 'cd @WORKDIR@ && exec @PY@ card_watcher.py'
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

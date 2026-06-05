@@ -5,15 +5,26 @@ sqlite-vec>=0.1.0
 # Optional: production web server for `dam serve`
 # gunicorn>=21.0
 
-# Desktop window wrapper
+# Desktop window wrapper.
+# pywebview needs a native web engine backend:
+#   - Linux: a GTK backend (system pkgs: python-gobject + webkit2gtk / webkitgtk-6.0)
+#            OR the Qt backend provided by PySide6 below.
+#   - macOS: uses the built-in WKWebView (no extra packages).
 pywebview>=5.0.0
 PySide6>=6.6
 
 # Progress bars
 tqdm>=4.60
 
-# Image processing (thumbnail resize fallback on non-macOS)
+# Image processing (RAW/JPEG resize; required outside macOS where `sips` is absent)
 Pillow>=10.0
+
+# SigLIP embedding + zero-shot tagging pipeline (dam_siglip).
+# NOTE: on Linux the default PyPI `torch` wheel ships CUDA. For CPU-only install
+# first:  pip install torch --index-url https://download.pytorch.org/whl/cpu
+# For AMD/ROCm use the rocm index. Then install the rest of this file.
+torch>=2.2
+transformers>=4.40
 
 # Testing
 pytest>=7.0

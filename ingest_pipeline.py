@@ -1,4 +1,4 @@
-#!/opt/homebrew/bin/python3
+#!/usr/bin/env python3
 """Shared orchestration for card ingest pipeline steps."""
 
 from __future__ import annotations

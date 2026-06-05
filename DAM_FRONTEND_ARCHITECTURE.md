@@ -4,7 +4,7 @@
 **Status:** Weekends 1–5 complete. Sprint 4 (list view + audit fixes) next.
 **Stack:** TypeScript + React + Tailwind CSS v4
 **IDE:** WebStorm (JetBrains, licensed)
-**Backend:** Flask API at `localhost:5001` (port 5000 blocked by macOS AirPlay)
+**Backend:** Flask API at `localhost:5001` (5001 chosen because port 5000 is taken by macOS AirPlay; on Linux 5000 is free but 5001 is kept for parity — configurable via `port` in `~/.dam/config.json`)
 
 ---
 
@@ -211,7 +211,7 @@ dam/
 - ✅ Flask routes for `/assets/` and `/favicon.svg` (Vite build output)
 - ✅ Production build outputs to `static/`, served by Flask on port 5001
 - ⚠️ Note: `NODE_ENV=development` required for `npm install` (system has NODE_ENV=production)
-- ⚠️ Note: Port 5000 blocked by macOS AirPlay Receiver — use 5001
+- ⚠️ Note: Port 5000 blocked by macOS AirPlay Receiver — use 5001 (free on Linux, kept for parity)
 
 ### Weekend 2: Lightbox + Culling — ✅ COMPLETE (2026-04-07)
 - ✅ Lightbox overlay (double-click thumbnail to open)
@@ -244,10 +244,10 @@ dam/
 - ✅ Dark mode default throughout
 
 ### Weekend 5: Desktop Polish — ✅ COMPLETE (2026-04-09)
-- ✅ pywebview native macOS window with JS bridge + native menu bar
+- ✅ pywebview native window (macOS WKWebView / Linux WebKit2GTK or Qt) with JS bridge + native menu bar; falls back to the system browser when no Linux backend is installed
 - ✅ Window title with filter/count (via `pywebview.api.set_title()`)
-- ✅ PyInstaller one-directory `.app` bundle (`dam.spec`) with sqlite_vec.dylib
-- ✅ Custom gold aperture icon (`assets/icon.icns`)
+- ✅ PyInstaller one-directory bundle (`dam.spec`): `.app` + `sqlite_vec.dylib` on macOS, `dist/dam/` + `vec0.so` on Linux
+- ✅ Custom gold aperture icon (`assets/icon.icns` on macOS, `assets/icon.svg` for the Linux `.desktop` entry)
 - ✅ Makefile: `make build`, `make run`, `make test`, `make clean`
 - ✅ PACKAGING.md updated
 - 🔲 ImageList (table view) as alternative to grid — Sprint 4

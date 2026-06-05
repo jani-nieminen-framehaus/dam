@@ -5,8 +5,14 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from platform_utils import MountInfo, find_archive_mounts, free_bytes, is_dir_writable, volume_label
-
+from platform_utils import (
+    MountInfo,
+    find_archive_mounts,
+    free_bytes,
+    is_dir_writable,
+    linux_media_roots,
+    volume_label,
+)
 
 _TRAILING_NUMBER_RE = re.compile(r"(\d+)$")
 
@@ -62,9 +68,24 @@ def derive_legacy_identity(file_path: str | Path, aliases: dict[str, str] | None
         return logical_volume_for_root(root, aliases), relative_path_from_root(path, root)
 
     parts = path.parts
+    # macOS: /Volumes/<label>/<rel>
     if len(parts) >= 3 and parts[0] == "/" and parts[1] == "Volumes":
         root = Path(parts[0]) / parts[1] / parts[2]
         return logical_volume_for_root(root, aliases), relative_path_from_root(path, root)
+
+    # Linux: /run/media/<user>/<label>/<rel>, /media/<user|label>/<rel>, /mnt/<label>/<rel>.
+    # Roots are ordered most-specific-first so /media/<user> wins over bare /media.
+    for base in linux_media_roots():
+        try:
+            rel = path.relative_to(base)
+        except ValueError:
+            continue
+        rel_parts = rel.parts
+        if not rel_parts:
+            continue
+        label = rel_parts[0]
+        remainder = str(Path(*rel_parts[1:])) if len(rel_parts) > 1 else None
+        return canonical_volume_label(label, aliases), remainder
 
     return None, None
 

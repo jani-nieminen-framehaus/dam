@@ -14,6 +14,11 @@ dependencies = [
     "PySide6>=6.6",
     "tqdm>=4.60",
     "Pillow>=10.0",
+    # SigLIP embedding/search pipeline (dam_siglip). The default PyPI torch wheel
+    # is CUDA-enabled on Linux; for CPU-only or ROCm, install torch from the matching
+    # index first (see requirements.txt) before `uv sync` / `pip install`.
+    "torch>=2.2",
+    "transformers>=4.40",
 ]
 
 [project.optional-dependencies]
@@ -35,7 +40,9 @@ py-modules = [
     "dam_schema",
     "dam_api",
     "dam_scanner",
+    "dam_siglip",
     "dam_tagger",
+    "dam_vlm",
     "card_ingest",
     "card_watcher",
     "ingest_monitor",

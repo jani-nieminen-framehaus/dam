@@ -1,8 +1,9 @@
-#!/opt/homebrew/bin/python3
+#!/usr/bin/env python3
 """
 Card Ingest Script — moves RAW+JPEG files from memory card to dated folders.
-Target: /Volumes/Photos1/YYYY-MM-DD/ (fallback: Photos2)
-Source: any mounted card (auto-detects /Volumes/XXXXX/DCIM/)
+Target: <archive volume>/YYYY-MM-DD/ — the best writable local archive (config dest_root),
+        resolved per-OS (Linux: /run/media/<user>/..., macOS: /Volumes/...).
+Source: any mounted card with a DCIM folder (auto-detected across mount roots).
 
 Usage:
     python3 card_ingest.py                    # auto-detect card

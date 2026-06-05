@@ -1,4 +1,4 @@
-#!/opt/homebrew/bin/python3
+#!/usr/bin/env python3
 """
 DAM Card Watcher — auto-detect SD/CFexpress card mount and trigger full ingest pipeline.
 

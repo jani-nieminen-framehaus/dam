@@ -16,12 +16,35 @@ from pathlib import Path
 CONFIG_DIR = Path.home() / ".dam"
 CONFIG_FILE = CONFIG_DIR / "config.json"
 
+
+def _default_archive_volumes():
+    """Return (dest_root, default_volumes) for the current OS.
+
+    Removable archive disks mount under different roots per platform:
+      - macOS:   /Volumes/<label>
+      - Linux:   /run/media/<user>/<label>   (udisks2)
+      - Windows: drive letters (no common parent — sensible placeholders)
+    These are only first-run defaults; ~/.dam/config.json overrides them, and the
+    storage layer resolves configured roots to whatever is actually mounted by
+    matching volume_aliases, so a stale path still works as long as the label maps.
+    """
+    if sys.platform == "darwin":
+        return "/Volumes/Photos1", ["/Volumes/Photos1", "/Volumes/Photos2"]
+    if os.name == "nt":
+        return "D:\\", ["D:\\", "E:\\"]
+    user = os.environ.get("USER") or os.environ.get("LOGNAME") or ""
+    base = f"/run/media/{user}" if user else "/media"
+    return f"{base}/Photos1", [f"{base}/Photos1", f"{base}/Photos2"]
+
+
+_DEST_ROOT, _DEFAULT_VOLUMES = _default_archive_volumes()
+
 DEFAULTS = {
     "dam_root": str(Path.home() / "Documents" / "dam"),
     "db_path": None,  # derived: dam_root/dam.db
     "thumb_dir": None,  # derived: dam_root/thumbs
-    "dest_root": "/Volumes/Photos1",
-    "default_volumes": ["/Volumes/Photos1", "/Volumes/Photos2"],
+    "dest_root": _DEST_ROOT,
+    "default_volumes": _DEFAULT_VOLUMES,
     "volume_aliases": {
         "kuvia1": "Archive 1",
         "Kuvia1": "Archive 1",

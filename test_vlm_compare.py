@@ -1,4 +1,4 @@
-#!/opt/homebrew/bin/python3
+#!/usr/bin/env python3
 """
 Quick A/B comparison: LLaVA 34B vs Qwen2.5-VL 72B on known-bad images.
 Run after pulling qwen2.5vl:72b into Ollama.

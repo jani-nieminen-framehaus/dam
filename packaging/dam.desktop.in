@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=DAM
+GenericName=Photo Asset Manager
+Comment=Personal photo Digital Asset Management
+Exec=@EXEC@
+Icon=@ICON@
+Terminal=false
+Categories=Graphics;Photography;Viewer;
+Keywords=photo;raw;dam;archive;

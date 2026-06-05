@@ -17,8 +17,8 @@ raw vec0 blobs by primary key is awkward through stock sqlite-vec). This
 script reads the stored embeddings directly via the vec0 query interface,
 making reclassify properly cheap.
 
-Run:
-  /opt/homebrew/bin/python3 /Users/janinieminen/Documents/dam/tools/reclassify.py
+Run (from the project root):
+  uv run python tools/reclassify.py
 
 Idempotent. Safe to interrupt and resume (per-batch commits, although the
 ALL-or-nothing wipe at the start means you should NOT interrupt during the

@@ -7,8 +7,8 @@ write tags with confidence. More efficient than two separate passes.
 Resumable: SELECT only WHERE the relevant timestamp IS NULL. Re-running picks
 up where it stopped. Per-batch commits keep progress durable.
 
-Run:
-  /opt/homebrew/bin/python3 /Users/janinieminen/Documents/dam/tools/bootstrap_siglip.py all
+Run (from the project root):
+  uv run python tools/bootstrap_siglip.py all
 """
 import sys, os, time, argparse, sqlite3, json
 from pathlib import Path

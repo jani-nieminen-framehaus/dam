@@ -146,9 +146,18 @@ CREATE TABLE IF NOT EXISTS thumbnails (
 );
 
 -- AI embedding vectors (sqlite-vec)
+-- Legacy 768-dim text embeddings (nomic-embed via Ollama). Kept for back-compat.
 CREATE VIRTUAL TABLE IF NOT EXISTS image_embeddings USING vec0(
     image_id INTEGER PRIMARY KEY,
     embedding float[768]
+);
+
+-- Current 1152-dim SigLIP image embeddings — primary search/index table.
+-- (Originally added by tools/migrate_v2_siglip.py; folded into the base schema
+-- so fresh databases have it too.)
+CREATE VIRTUAL TABLE IF NOT EXISTS image_embeddings_siglip USING vec0(
+    image_id INTEGER PRIMARY KEY,
+    embedding float[1152]
 );
 
 -- Indexes for fast queries
