@@ -1,18 +1,19 @@
 #!/usr/bin/env python3
 """
-dam_vlm.py — Qwen 2.5 VL 32B 4-bit (MLX) wrapper for image description.
+dam_vlm.py — Qwen 2.5 VL wrapper for image description (CUDA + transformers).
 
-Replaces (in the new pipeline):
-  - dam_tagger.py's LLaVA-via-Ollama description path
+Replaces the prior MLX-only Mac path. Default model is Qwen2.5-VL-32B-Instruct
+in bnb-NF4 (matches Mac MLX 4-bit quality baseline); 7B-fp16 is a one-line
+variant flip for ~3x throughput at slightly lower quality.
 
 Design:
   - Module-level lazy singleton: model loads on first use, stays in memory.
-  - MLX-only (Apple Silicon). No CUDA/CPU fallback for the VLM — this model
-    is mac-only here. Use a different module if you want portability.
-  - Image input always a path; mlx_vlm handles open + resize internally.
-  - Per-image inference, ~10-20s on M3 Ultra at 4-bit quant.
+  - CUDA-only. Hard-pinned to cuda:1 to leave cuda:0 free for SigLIP
+    (~3.3 GB resident). Falls back to cuda:0 on single-GPU hosts.
+  - Image input always a path; processor + qwen_vl_utils handle preprocessing.
+  - Per-image inference, ~10 s on Turing (sm_75) at NF4 / fp16-compute.
   - DB writes are atomic per image. Caller manages transaction + commit.
-  - 22 GB resident during inference, drops to ~6 GB between images.
+  - ~17 GB resident for 32B-NF4.
 
 Depends on schema v3 (description_prompt_version column on images).
 Run tools/migrate_v3_prompt_version.py before any DB writes.
@@ -28,7 +29,29 @@ from pathlib import Path
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 
-MODEL_ID = "mlx-community/Qwen2.5-VL-32B-Instruct-4bit"
+# Variant switch. Flip MODEL_VARIANT to change defaults; both code paths stay live.
+#   "32B-bnb4" — Qwen/Qwen2.5-VL-32B-Instruct in bnb NF4. ~17 GB. ~10 s/img on RTX 6000.
+#                Matches the Mac MLX 4-bit quality baseline.
+#   "7B-fp16"  — Qwen/Qwen2.5-VL-7B-Instruct fp16. ~16 GB. ~3 s/img. Lower quality.
+MODEL_VARIANT = "32B-bnb4"
+
+MODEL_IDS = {
+    "7B-fp16":  "Qwen/Qwen2.5-VL-7B-Instruct",
+    "32B-bnb4": "Qwen/Qwen2.5-VL-32B-Instruct",
+}
+MODEL_ID = MODEL_IDS[MODEL_VARIANT]
+
+# Hard pin: cuda:1 is the "describe" GPU. cuda:0 hosts SigLIP (~3.3 GB resident).
+# device_map="auto" was rejected — it spills weights onto cuda:0 and OOMs
+# whenever SigLIP runs a search in parallel with a describe step.
+VLM_DEVICE = "cuda:1"
+
+# Qwen2.5-VL pixel budget. Defaults in qwen-vl-utils are 4..16384 visual tokens;
+# we clamp tighter because our inputs are already 2048-px previews / 300-px thumbs.
+# Do NOT pass image_patch_size=16 to process_vision_info — that's Qwen3-VL.
+# Qwen2.5-VL uses patch_size=14 and qwen-vl-utils' defaults are correct for it.
+MIN_PIXELS = 256 * 28 * 28
+MAX_PIXELS = 1280 * 28 * 28
 
 # Prompt version stamped on every description this module writes.
 # Bump this constant + write a new migration if you change DESCRIPTION_PROMPT.
@@ -67,30 +90,91 @@ DESCRIPTION_PROMPT = (
 
 MAX_TOKENS = 200
 
-# Input source priority — 2048px preview first, 300px thumb as fallback
-PREVIEW_DIR = Path(os.path.expanduser("~/Documents/dam/previews"))
-THUMB_DIR = Path(os.path.expanduser("~/Documents/dam/thumbs"))
+# Input source priority — 2048-px preview first, 300-px thumb fallback.
+# Same cross-platform pattern as the dam_siglip.load_vocabulary patch:
+# resolve via dam_config when importable; fall back to the original Mac
+# defaults so this module remains usable standalone.
+try:
+    from dam_config import DAM_ROOT
+    PREVIEW_DIR = DAM_ROOT / "previews"
+    THUMB_DIR = DAM_ROOT / "thumbs"
+except Exception:
+    PREVIEW_DIR = Path(os.path.expanduser("~/Documents/dam/previews"))
+    THUMB_DIR = Path(os.path.expanduser("~/Documents/dam/thumbs"))
 
 
 # ── Lazy model singleton ──────────────────────────────────────────────────────
 
 _model = None
 _processor = None
-_config = None
+_device: str | None = None
 
 
 def get_model():
-    """Load and return (model, processor, config). Cached after first call.
-    First load is ~60-120s; subsequent calls are free."""
-    global _model, _processor, _config
-    if _model is None:
-        from mlx_vlm import load
-        from mlx_vlm.utils import load_config
-        t0 = time.time()
-        _model, _processor = load(MODEL_ID)
-        _config = load_config(MODEL_ID)
-        print(f"[vlm] loaded {MODEL_ID} in {time.time()-t0:.1f}s")
-    return _model, _processor, _config
+    """Load and return (model, processor, device). Cached after first call.
+    First load is ~30-60 s for 7B fp16, ~90-180 s for 32B-NF4 (one-shot
+    on-load quantization).
+
+    Note: the third tuple element used to be `config` (mlx-vlm's load_config
+    object). In the CUDA rewrite it's the device string. No external caller
+    in this repo unpacks all three elements (describe_all.py only uses
+    pick_input, describe_image_to_db, get_model() for warm-up).
+    """
+    global _model, _processor, _device
+    if _model is not None:
+        return _model, _processor, _device
+
+    import torch
+    from transformers import AutoProcessor, Qwen2_5_VLForConditionalGeneration
+
+    if not torch.cuda.is_available():
+        raise RuntimeError("dam_vlm requires CUDA. Use the MLX branch on Mac.")
+    # Pin to cuda:1 if available so cuda:0 stays free for SigLIP.
+    # Single-GPU hosts (e.g. a CachyOS laptop dev box) fall back to cuda:0 —
+    # SigLIP will share the card; on a 24 GB card the combined footprint is
+    # ~21 GB for 7B-fp16 + SigLIP, tolerable but tight.
+    if torch.cuda.device_count() >= 2:
+        device = VLM_DEVICE
+    else:
+        device = "cuda:0"
+    _device = device
+
+    t0 = time.time()
+    if MODEL_VARIANT == "32B-bnb4":
+        from transformers import BitsAndBytesConfig
+        # IMPORTANT: compute_dtype=torch.float16 on Turing (sm_75).
+        # bf16 MMA requires sm_80+ (Ampere). Using bf16 here silently emulates
+        # in fp32 and tanks throughput. Do NOT "fix" this back to bf16 by
+        # copying it from a Qwen blog post — those assume Ampere+.
+        bnb = BitsAndBytesConfig(
+            load_in_4bit=True,
+            bnb_4bit_quant_type="nf4",
+            bnb_4bit_compute_dtype=torch.float16,
+            bnb_4bit_use_double_quant=True,
+        )
+        _model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
+            MODEL_ID,
+            quantization_config=bnb,
+            device_map={"": device},
+            attn_implementation="sdpa",  # flash-attn 2 requires sm_80+; not available on Turing
+            torch_dtype=torch.float16,
+        )
+    else:  # 7B-fp16
+        _model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
+            MODEL_ID,
+            torch_dtype=torch.float16,
+            device_map={"": device},
+            attn_implementation="sdpa",
+        )
+
+    _model.eval()
+    _processor = AutoProcessor.from_pretrained(
+        MODEL_ID,
+        min_pixels=MIN_PIXELS,
+        max_pixels=MAX_PIXELS,
+    )
+    print(f"[vlm] loaded {MODEL_ID} on {device} ({MODEL_VARIANT}) in {time.time()-t0:.1f}s")
+    return _model, _processor, _device
 
 
 def is_loaded() -> bool:
@@ -103,7 +187,7 @@ def is_loaded() -> bool:
 
 
 def pick_input(image_id: int) -> Path | None:
-    """Prefer 2048px preview, fall back to 300px thumbnail. Returns None if
+    """Prefer 2048-px preview, fall back to 300-px thumbnail. Returns None if
     neither exists (e.g. RAF stragglers without previews — should be filtered
     out by the runner's queue query, not handled here)."""
     for d in (PREVIEW_DIR, THUMB_DIR):
@@ -122,32 +206,55 @@ def describe_image(image_path: Path | str, *, max_tokens: int = MAX_TOKENS) -> s
     Raises on missing input, model failure, or empty output. Caller decides
     whether to skip + log or abort.
     """
-    from mlx_vlm import generate
-    from mlx_vlm.prompt_utils import apply_chat_template
+    import torch
+    from qwen_vl_utils import process_vision_info
 
-    model, processor, config = get_model()
+    model, processor, device = get_model()
     image_path = Path(image_path)
     if not image_path.exists():
         raise FileNotFoundError(f"input image missing: {image_path}")
 
-    messages = [{"role": "user", "content": DESCRIPTION_PROMPT}]
-    formatted = apply_chat_template(processor, config, messages, num_images=1)
+    messages = [{
+        "role": "user",
+        "content": [
+            {"type": "image", "image": f"file://{image_path.as_posix()}"},
+            {"type": "text", "text": DESCRIPTION_PROMPT},
+        ],
+    }]
 
-    result = generate(
-        model,
-        processor,
-        formatted,
-        image=[str(image_path)],
-        max_tokens=max_tokens,
-        verbose=False,
+    image_inputs, video_inputs = process_vision_info(messages)
+    text = processor.apply_chat_template(
+        messages, tokenize=False, add_generation_prompt=True
     )
+    inputs = processor(
+        text=[text],
+        images=image_inputs,
+        videos=video_inputs,
+        padding=True,
+        return_tensors="pt",
+    ).to(device)
 
-    # mlx-vlm generate returns either a string or a GenerationResult object
-    text = result.text if hasattr(result, "text") else str(result)
-    text = text.strip()
-    if not text:
+    with torch.no_grad():
+        output_ids = model.generate(
+            **inputs,
+            max_new_tokens=max_tokens,
+            do_sample=False,        # deterministic — re-runs yield the same description
+            temperature=None,       # avoid the "do_sample=False but temperature set" warning
+            top_p=None,
+            top_k=None,
+            repetition_penalty=1.0,
+            pad_token_id=processor.tokenizer.eos_token_id,
+        )
+
+    trimmed = [
+        out[len(inp):] for inp, out in zip(inputs.input_ids, output_ids)
+    ]
+    text_out = processor.batch_decode(
+        trimmed, skip_special_tokens=True, clean_up_tokenization_spaces=True
+    )[0].strip()
+    if not text_out:
         raise RuntimeError("vlm returned empty description")
-    return text
+    return text_out
 
 
 # ── DB write ──────────────────────────────────────────────────────────────────
@@ -187,30 +294,46 @@ def describe_image_to_db(conn, image_id: int, image_path: Path | str) -> str:
 
 
 def _smoke():
-    """Proof-of-life: load model, describe 5 known images, compare side-by-side
-    with prior ai_description (legacy LLaVA or earlier Qwen). Read-only on
-    dam.db. NO writes. Uses same test_ids as tools/smoke_qwen.py for direct
-    comparability."""
-    import sqlite3
-    DB = Path(os.path.expanduser("~/.dam/dam.db"))
+    """Proof-of-life: load model, describe 5 newest pending images, compare
+    side-by-side with prior ai_description (will be null on a fresh Windows
+    DB). Read-only on dam.db. NO writes.
 
-    test_ids = [6210, 280, 160, 2, 11]
-    conn = sqlite3.connect(str(DB))
+    Test IDs are picked dynamically because the legacy [6210, 280, 160, 2, 11]
+    aren't present in the current Windows DB.
+    """
+    import sqlite3
+    try:
+        from dam_config import DB_PATH as _db
+        db_path = _db
+    except Exception:
+        db_path = Path(os.path.expanduser("~/.dam/dam.db"))
+
+    conn = sqlite3.connect(str(db_path))
     conn.row_factory = sqlite3.Row
+    rows = conn.execute(
+        "SELECT id, file_name, ai_description FROM images "
+        "WHERE described_at IS NULL ORDER BY id DESC LIMIT 5"
+    ).fetchall()
+    if not rows:
+        rows = conn.execute(
+            "SELECT id, file_name, ai_description FROM images "
+            "ORDER BY id DESC LIMIT 5"
+        ).fetchall()
 
     pairs = []
-    for i in test_ids:
-        inp = pick_input(i)
-        row = conn.execute(
-            "SELECT id, file_name, ai_description FROM images WHERE id = ?",
-            (i,),
-        ).fetchone()
-        if inp and row:
-            pairs.append((row, inp))
+    for r in rows:
+        inp = pick_input(r["id"])
+        if inp:
+            pairs.append((r, inp))
         else:
-            print(f"[smoke] skip id={i} (no input or DB row)")
+            print(f"[smoke] skip id={r['id']} (no preview/thumb)")
     conn.close()
 
+    if not pairs:
+        print("[smoke] no images with input files; nothing to do.")
+        return
+
+    times = []
     for row, inp in pairs:
         print(f"\n{'='*70}")
         print(f"id={row['id']}  file={row['file_name']}")
@@ -221,11 +344,14 @@ def _smoke():
         try:
             text = describe_image(inp)
             elapsed = time.time() - t0
+            times.append(elapsed)
             print(f"new ({elapsed:.1f}s): {text}")
         except Exception as e:
             print(f"FAIL: {e}")
 
-    print(f"\n{'='*70}\n[smoke] done.")
+    if times:
+        avg = sum(times) / len(times)
+        print(f"\n{'='*70}\n[smoke] {len(times)} ok, avg {avg:.2f}s/img")
 
 
 if __name__ == "__main__":

@@ -40,10 +40,21 @@ from pathlib import Path
 
 # ── Paths ────────────────────────────────────────────────────────────────────
 
-DAM_DIR = Path(os.path.expanduser("~/.dam"))
-DB_PATH = DAM_DIR / "dam.db"
+# Per-user runtime state — same on every OS (~/.dam/).
+DAM_DIR = Path.home() / ".dam"
 LOCKFILE = DAM_DIR / "describer.pid"
-STATUS_FILE = Path(os.path.expanduser("~/Documents/dam/vlm_status.json"))
+
+# DB + status-file paths resolve via dam_config so this works cross-platform
+# (was hardcoded ~/.dam/dam.db and ~/Documents/dam/vlm_status.json). Same
+# fallback pattern as the dam_siglip / bootstrap_siglip / migrate_v2_siglip
+# patches in this branch.
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+try:
+    from dam_config import DB_PATH, DAM_ROOT
+    STATUS_FILE = DAM_ROOT / "vlm_status.json"
+except Exception:
+    DB_PATH = DAM_DIR / "dam.db"
+    STATUS_FILE = Path(os.path.expanduser("~/Documents/dam/vlm_status.json"))
 
 # Hard sanity limit — if more than this fail in one run, abort.
 MAX_FAILURES = 100

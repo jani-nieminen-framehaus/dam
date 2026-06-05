@@ -23,8 +23,17 @@ Pillow>=10.0
 # NOTE: on Linux the default PyPI `torch` wheel ships CUDA. For CPU-only install
 # first:  pip install torch --index-url https://download.pytorch.org/whl/cpu
 # For AMD/ROCm use the rocm index. Then install the rest of this file.
-torch>=2.2
-transformers>=4.40
+torch>=2.6
+torchvision>=0.21
+transformers>=4.49
+sentencepiece>=0.2
+protobuf>=4.25
+
+# Qwen2.5-VL describer (dam_vlm, CUDA). bitsandbytes is for the 32B 4-bit variant
+# and has no macOS wheels — skip it on Darwin.
+accelerate>=0.34
+qwen-vl-utils>=0.0.10
+bitsandbytes>=0.45 ; platform_system != 'Darwin'
 
 # Testing
 pytest>=7.0

@@ -18,7 +18,10 @@ import sqlite3
 import sys
 from pathlib import Path
 
-DB_PATH = Path(os.path.expanduser("~/.dam/dam.db"))
+# Use dam_config so this works cross-platform (was hardcoded ~/.dam/dam.db).
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from dam_config import DB_PATH
+
 assert DB_PATH.exists(), f"DB not found at {DB_PATH}"
 
 EXPECTED_VERSION_BEFORE = 2
